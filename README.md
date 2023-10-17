@@ -8,10 +8,11 @@ What's next: a PoC
 - ✅ Generate ambient primes
     - ✅ Generate large primes $p, q$
     - ✅ Generate block size and large primes $p, q, r$ that form valid ambient primes
-- ✅ Generate key pair
+- 🚧 Generate key pair
     - ✅ Multiply large primes
     - ✅ **Generate random element from $\mathbb{Z}_n^*$**
     - ✅ `modexp` for verifying that the generated $y$ is valid
+    - 🚧 `modexp` with better performance and/or constant time performance
 - 🚧 Encryption and decryption
     - ✅ Generating random element from the multiplicative group and `modexp` can be reused 
     - ✅ `modmul` for multiplying two large numbers under modulo
