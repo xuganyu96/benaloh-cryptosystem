@@ -68,3 +68,8 @@ When the ring modulo $r$ is a prime, there is no better algorithm for finding di
 2. **Security**: having a scaling time complexity leaves the implementation vulnerable to side-channel attack
 
 Observe that $r$ does not have to be prime; instead, it can be a power of a single prime (and definition of $y$ needs to be adjusted accordingly). If $r$ is the power of a single prime, then we can apply [Hensel's lifting lemma](https://en.wikipedia.org/wiki/Hensel%27s_lemma) to compute discrete log in polynomial time (credits: Youcef Mukrani).
+
+### Constant-time discrete log
+Do note that in the context of RSA, constant-time exponentiation is constant with respect to the secret exponent $d$ instead of being constant with respect to everything. In a similar manner, the brute-force discrete log will be constant time with respect to the plaintext $m$. It will not be constant time with respect to the block size $r$.
+
+This means that if I stick with a brute-force discrete log, then I need to iterate through all values in the integer ring $\mathbb{Z}_r$ even if a match has been found. This will be an effective way of preventing timing attacks that can tell the plaintext based on how many exponentiations are done.
