@@ -1,5 +1,9 @@
 //! Proof-of-concept implementation
-use crypto_bigint::{rand_core::OsRng, Checked, CheckedMul, CheckedSub, NonZero, RandomMod, U512, CheckedAdd};
+use crypto_bigint::{
+    modular::runtime_mod::{DynResidue, DynResidueParams},
+    rand_core::OsRng,
+    Checked, CheckedAdd, CheckedMul, CheckedSub, NonZero, RandomMod, U512,
+};
 use crypto_primes;
 use std::process;
 
@@ -118,13 +122,8 @@ impl Params {
     }
 }
 
-/// Generate ambient prime p, q, r such that
-/// 1. r divides (p-1)
-/// 2. gcd(r, (p-1)/r) is 1
-/// 3. gcd(r, q-1) is 1
-#[allow(unused_variables)]
 fn main() {
-    let params = Params::generate(8);
+    let params = Params::generate(16);
 
     let (n, phi) = compute_n_phi(params.p, params.q);
     let (y, x) = generate_y_x(phi, params.r, n);
@@ -132,7 +131,8 @@ fn main() {
     let pk = PublicKey::new(n, y, params.r);
     let sk = SecretKey::new(phi, x);
 
-    let plaintext = U512::random_mod(&mut OsRng, &NonZero::new(params.r).unwrap());
+    // let plaintext = U512::random_mod(&mut OsRng, &NonZero::new(params.r).unwrap());
+    let plaintext = params.r.checked_sub(&U512::ONE).unwrap();
     let ciphertext = encrypt(&pk, plaintext);
     let decryption = decrypt(&pk, &sk, ciphertext);
 
@@ -144,8 +144,6 @@ fn main() {
         process::exit(1);
     }
 }
-
-
 
 /// Compute n <- p * q and phi <- (p-1)(q-1)
 fn compute_n_phi(p: U512, q: U512) -> (U512, U512) {
@@ -219,7 +217,9 @@ fn encrypt(pk: &PublicKey, pt: U512) -> U512 {
 /// A brute-force discete log, assuming that target is indeed some power of base
 fn discrete_log(base: U512, target: U512, modulo: NonZero<U512>, order: U512) -> U512 {
     let mut exp: U512 = U512::ZERO;
-    while vartime_modexp(base, exp, modulo) != target {
+    let params = DynResidueParams::new(&modulo);
+    let base = DynResidue::new(&base, params);
+    while base.pow(&exp).retrieve() != target {
         if exp >= order {
             panic!("discrete log failed; exponent exceeded order of base");
         }
