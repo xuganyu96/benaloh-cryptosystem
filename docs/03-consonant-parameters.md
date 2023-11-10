@@ -1,50 +1,39 @@
 # Proof of consonant parameters
-A second issue with the naive election scheme is that the government can generate dishonest parameters. Recall that the government proves to the voter that each vote $\omega \equiv y^mz \mod n$ is decrypted correctly to $m$ by showing that $\omega \cdot y^{-m} \mod n$ is an r-th residue. However, if the parameters are generated incorrectly, such as when $r$ and $\phi$ are relatively prime, then the government will be able to claim arbitrary decryption because every element in $\mathbb{Z}_n^*$ is an r-th residue. Therefore, it is important that the government proves to the voters that the parameters are generated correctly.
+The government needs to prove to the voters that the parameters are generated correctly. This is important because dishonest parameters can be used to claim arbitrary tally. In the original thesis, this proof is achieved through two interactive proofs: first the voter proves to the government that the voter has a ciphertext that the voter knows the message to, then the government proves to the voter that it can correctly decrypt the ciphertext. In this section, we will review the proofs, and provide some improvements that reduce the interactivity of the procedure
 
-## Consonance of parameters
-(how do I introduce the concept of consonance?)
+## Dishonest parameters
+Recall from previous section that decryption is the process of recovering the residue class $\text{RC}[c]$ of the ciphertext, and the government proves to the voter that the decryption is indeed correct by showing that $\omega \cdot y^{-c} \in \mathbb{Z}_n^r$. However, if the parameters are generated dishonestly, then the government will be able to claim arbitrary decryption $c$ and still prove that $\omega y^{-c}$ is an r-th residue. For example, if $\gcd(r, \phi(n)) = 1$, then there exists solution to the diophantine equation $s \cdot r + t \cdot \phi(n) = 1$, and $z^s$ is such that $(z^s)^r = z$, meaning that **all elements of $\mathbb{Z}_n^*$ are r-th residue: $\mathbb{Z}_n^* = \mathbb{Z}_n^r$**. 
 
-There are a few important results that can be derived from the consonance properties:
+## Interactive proof of honest parameter
+The proof of honest parameter comes from the mathematical fact that given the triplet $(r, n, y)$, there are exactly $m$ distinct (and thus disjoint) residue classes, where $m$ is the smallest positive integer such that $y^m$ is an r-th residue (also called the norm of the triplet), and $m$ is necessarily a divisor of $r$.
 
-1. if $(r, n, y)$ are consonant, then there are exactly $r$ distinct residue classes
-1. if $r, n, y$ are consonant, then $\gcd(r, \phi) = r$
+This means that if the parameters are dishonest, then $m < r$, and by divisibility we know $m \leq r/2$, so there are at most $r/2$ distinct residue classes. If the voter can supply a ciphertext, then the chance of correct decryption cannot exceed 50%. In other words, voter can challenge the validity of the parameters by asking the government to show that it can decrypt ciphertext correctly. We call this the proof of consonance.
 
-## Interactive proof of consonance
-A naive interactive proof of consonance is for the government to demonstrate that there are indeed $r$ distinct residue classes. This works because the order of $(r, n, y)$ divides $r$, meaning that if there are fewer than $r$ distinct residue classes, then there are at most $\frac{r}{2}$ residue classes. Each voter can thus generate some random ciphertexts and ask the government to decrypt: if the parameters are honest, then the government will be able to decrypt all the time; if the parameters are dishonest, then the government will have at most $\frac{1}{2}$ chance of correctly guessing the underlying ciphertext.
+However, this interactive proof alone comes with the problem that dishonest voter can trick an honest government into decrypting arbitrary ciphertexts, so a second proof (we will call proof of residue class) is needed to show that the voter knows the residue class of the challenge ciphertext before the government can decrypt the challenge ciphertext.
 
-However, this naive interactvie proof is not zero-knowledge, because a dishonest voter can use an honest government as a decryption oracle in this interactive proof to obtain undue information. Benaloh proposed that a second interactive proof be used to show that the voter actually knows the plaintext.
+## Improvements
+The first improvement comes from re-formulating the proof of knowing residue class into a sigma protocol, then apply the Fiat-Shamir transformation to make it into a non-interactive proof.
 
-**Sigma protocol for proving knowledge of plaintext**:
+* **statement**: $\omega = y^cz$ for some secret $c \in \mathbb{Z}_r$ and secret $z \in \mathbb{Z}_n^r$
+* **commit**: $\omega^\prime = y^{c^\prime}z^\prime$ for some secret $c^\prime \leftarrow \mathbb{Z}_r$ and $z^\prime \leftarrow \mathbb{Z}_n^r$
+- **challenge**: $b = H(\omega^\prime)$ where $H: \mathbb{Z}_n^* \rightarrow \mathbb{Z}_r$ is a hash function
+- **response**: $c^\prime + bc \mod r$
+- **verification**: $\omega\omega^\prime y^{-(c^\prime + bc)}$ is an r-th residue
 
-- Statement: $\omega = y^cz$ for some $c \in \mathbb{Z}_r$ and $z \in \mathbb{Z}_n^r$
-- Commitment: $\omega^\prime = y^{c^\prime}z^\prime$ for some $c^\prime \in \mathbb{Z}_r$ and $z^\prime \leftarrow \mathbb{Z}_n^r$
-- Challenge: $b \leftarrow \mathbb{Z}_r$
-- Response: $c^\prime + bc$
+Note that the verification can be efficiently computed because the verifier (the government) has the secret key $\phi(n)$. Assuming that the parameters are generated correctly and the triplet $(r, n, y)$ is indeed consonant, then $\gcd(r, \phi(n)) = r$, meaning that the verifier can solve the diophantine equation $s \cdot r + t \cdot \frac{\phi}{r} = 1$. If the quantity $z^* = \omega\omega^\prime y^{-(c^\prime + bc)}$ is indeed an r-th residue then $(z^*)^s$ should be an r-th root.
 
-The government then verifies the response by checking if $\omega^b\omega^\prime \cdot y^{-(c^\prime+bc)}$ is an r-th residue, which can be done because the government has the secret key $\phi$. Correctness is trivial.
-
-This interactive proof is sound. Suppose we have a knowledge extract who can issue a second challenge $b^\prime$ for the same commit $\omega^\prime$, then the knowledge extractor can obtain $c^\prime + bc$ and $c^\prime + b^\prime c$. From here we can obtain $c$:
+The soundness of this proof can be shown through the knowledge extractor: given two distinct challenge $b_1, b_2$ and their corresponding responses $c^\prime + b_1c$, $c^\prime + b_2c$, we can recover the witness:
 
 $$
-c = \frac{(c^\prime + bc) - (c^\prime + b^\prime c)}{b - b^\prime}
+c = \frac{(c^\prime + b_2c) - (c^\prime + b_1c)}{b_2 - b_1}
 $$
 
-This interactive proof is also zero-knowledge against an honest government. Suppose we have a simulator who can revise its commit based on the challenge, then the simulator can produce a valid transcript without knowing the value of the witness $c$:
+The zero-knowledge property can be shown through a simulator: assuming that the verifier is honest and chooses its challenge independent of the commit, then the simulator can provide a transcript by fixing a response and computing the corresponding commit:
 
-1. Sample some random $c^* \leftarrow \mathbb{Z}_r$
-1. Sample some random $z^* \leftarrow \mathbb{Z}_n^r$
-1. Suppose the challenge is $b \leftarrow \mathbb{Z}_r$
-1. The transcript is as follows:
-    - Commit: $z^*y^{c^*}\omega^{-b}$
-    - Challenge: $b$
-    - Response: $c^*$
+$$
+\omega \cdot \text{commit} \cdot y^{-\text{resp}} \equiv z \mod n
+$$
 
-Thus we have a zero-knowledge proof that the voter is honest and not trying to use an honest government as a decryption oracle.
+where $z$ is some randomly sampled r-th residue.
 
-## Improved interactive proof
-While the two-phase interactive proof described above works, it is not ideal for several reasons:
-
-1. There are **two** proofs to do instead of a single proof
-2. The actual proof of consonance is not a sigma protocol, so it is hard to demonstrate soundness and zero-knowledge
-3. The baseline confidence is $1 - \frac{1}{2}$ which is not enough; we wish the baseline confidence to be $1 - \frac{1}{r}$ so we can prove using fewer interactions
-
+Assuming that the parameters are honest, the probability that the prover can fool the verifier is $\frac{1}{r}$, and we can increase the size of the commit and challenge to achieve arbitrary level of confidence that the voter indeed knows the residue class of the challenge ciphertext.
