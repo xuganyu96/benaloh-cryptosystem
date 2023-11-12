@@ -1,10 +1,10 @@
 //! The key pairs
+use crate::BigInt;
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
     CheckedAdd, CheckedMul, CheckedSub, NonZero, RandomMod,
 };
-use crate::BigInt;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct PublicKey {
@@ -77,8 +77,11 @@ impl KeyPair {
             .checked_add(&BigInt::ONE)
             .unwrap();
         let mut ready = {
-            if safe { crypto_primes::is_safe_prime(&p) }
-            else { crypto_primes::is_prime(&p) }
+            if safe {
+                crypto_primes::is_safe_prime(&p)
+            } else {
+                crypto_primes::is_prime(&p)
+            }
         };
         while !ready {
             let x = BigInt::random_mod(&mut OsRng, &NonZero::new(xbound).unwrap());
@@ -90,8 +93,11 @@ impl KeyPair {
                 .checked_add(&BigInt::ONE)
                 .unwrap();
             ready = {
-                if safe { crypto_primes::is_safe_prime(&p) }
-                else { crypto_primes::is_prime(&p) }
+                if safe {
+                    crypto_primes::is_safe_prime(&p)
+                } else {
+                    crypto_primes::is_prime(&p)
+                }
             };
         }
         return p;
@@ -103,15 +109,21 @@ impl KeyPair {
         let x = BigInt::random_mod(&mut OsRng, &NonZero::new(xbound).unwrap());
         let mut q = r.checked_mul(&x).unwrap().checked_add(&b).unwrap();
         let mut ready = {
-            if safe { crypto_primes::is_safe_prime(&q) }
-            else { crypto_primes::is_prime(&q) }
+            if safe {
+                crypto_primes::is_safe_prime(&q)
+            } else {
+                crypto_primes::is_prime(&q)
+            }
         };
         while !ready {
             let x = BigInt::random_mod(&mut OsRng, &NonZero::new(xbound).unwrap());
             q = r.checked_mul(&x).unwrap().checked_add(&b).unwrap();
             ready = {
-                if safe { crypto_primes::is_safe_prime(&q) }
-                else { crypto_primes::is_prime(&q) }
+                if safe {
+                    crypto_primes::is_safe_prime(&q)
+                } else {
+                    crypto_primes::is_prime(&q)
+                }
             };
         }
         return q;
@@ -132,15 +144,33 @@ impl KeyPair {
     /// y^{phi/r} != 1 (mod n)
     fn sample_nonresidue(modulus: BigInt, r: BigInt, phi: BigInt) -> BigInt {
         let quotient = phi.checked_div(&r).unwrap();
-        
+
         loop {
             let y = Self::sample_invertible(modulus);
             if DynResidue::new(&y, DynResidueParams::new(&modulus))
                 .pow(&quotient)
-                .retrieve() != BigInt::ONE {
+                .retrieve()
+                != BigInt::ONE
+            {
                 return y;
             }
         }
+    }
+
+    /// Given that (r, n, y) is prime consonance, we can use the secret key to efficiently find the
+    /// r-th root of some r-th residue using the following relation:
+    /// A * r + B * (phi / r) = 1,
+    /// Notice that A is r's multiplicative inverse modulus (phi / r) and is dependent only on the
+    /// keypair, so we can compute it ahead of time
+    pub fn get_rth_root_exp(&self) -> BigInt {
+        let r = self.pk.r;
+        let phi = self.sk.phi;
+        let phi_over_r = phi.checked_div(&r).unwrap();
+        let (root_exp, is_invertible) = r.inv_mod(&phi_over_r);
+        if is_invertible.into() {
+            return root_exp;
+        }
+        panic!("r, phi/r not relatively prime");
     }
 
     /// Assuming that (r, n, y) is prime consonance, check that it is also perfect consonance.
@@ -192,7 +222,6 @@ impl KeyPair {
         return Self::new(PublicKey::new(r, n, y), SecretKey::new(phi));
     }
 }
-
 
 #[cfg(test)]
 mod tests {
