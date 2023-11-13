@@ -22,11 +22,27 @@ impl PublicKey {
     pub fn get_r(&self) -> &BigInt {
         &self.r
     }
+
     pub fn get_n(&self) -> &BigInt {
         &self.n
     }
+
     pub fn get_y(&self) -> &BigInt {
         &self.y
+    }
+
+    /// Return the multiplicative inverse of y
+    pub fn invert_y(&self) -> BigInt {
+        let (y_inv, invertible) = self.y.inv_mod(self.get_n());
+        if invertible.into() {
+            return y_inv;
+        }
+        panic!("y is not invertible");
+    }
+
+    /// Sample a random element from the multiplicative group Z/n
+    pub fn sample_invertible(&self) -> BigInt {
+        return KeyPair::sample_invertible(self.n);
     }
 }
 
@@ -130,6 +146,7 @@ impl KeyPair {
     }
 
     /// Sample from the multiplicative group (mod n)
+    /// TODO: move this somewhere more accessible
     fn sample_invertible(modulus: BigInt) -> BigInt {
         loop {
             let y = BigInt::random_mod(&mut OsRng, &NonZero::new(modulus).unwrap());

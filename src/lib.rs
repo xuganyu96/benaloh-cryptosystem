@@ -12,7 +12,8 @@
 use crypto_bigint::U256;
 
 /// Use the same big integer type everywhere
-type BigInt = U256;
+pub type BigInt = U256;
 
+pub mod arithmetics;
 pub mod keys;
 pub mod proofs;
