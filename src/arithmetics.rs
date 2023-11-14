@@ -6,7 +6,7 @@ use crate::{
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
-    CheckedAdd, CheckedMul, NonZero, RandomMod,
+    CheckedAdd, NonZero, RandomMod,
 };
 
 /// The principle unit of arithmetic in Benaloh's cryptosystem.
@@ -16,7 +16,7 @@ use crypto_bigint::{
 /// for some 0 <= c < r and some x in Z/n.
 ///
 /// NOTE: this is basically a "transparent" ciphertext. We will probably need a opaque ciphertext
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct HigherResidue {
     /// The value itself
     val: BigInt,
@@ -69,13 +69,12 @@ impl HigherResidue {
             keypair.get_pk().get_n(),
         )
         .unwrap();
-        let witness = DynResidue::new(&keypair.get_pk().invert_y(), n)
-            .pow(&rc)
-            .retrieve();
-        let witness = val.checked_mul(&witness).unwrap();
+        let val = DynResidue::new(&val, n);
+        let witness = DynResidue::new(&keypair.get_pk().invert_y(), n).pow(&rc);
+        let witness = val.mul(&witness).retrieve();
         let witness = rth_root(witness, keypair).unwrap();
 
-        return Self::new(val, rc, witness, keypair.get_pk());
+        return Self::new(val.retrieve(), rc, witness, keypair.get_pk());
     }
 
     /// Construct a higher residue from its decomposition
@@ -111,9 +110,12 @@ impl HigherResidue {
     }
 
     /// Generate a random member of Z_n, including its decomposition
-    pub fn random(ambience: &PublicKey) -> Self {
+    pub fn random(class: Option<BigInt>, ambience: &PublicKey) -> Self {
         let r = NonZero::new(ambience.get_r().clone()).unwrap();
-        let c = BigInt::random_mod(&mut OsRng, &r);
+        let c = match class {
+            Some(class) => class,
+            None => BigInt::random_mod(&mut OsRng, &r),
+        };
         let x = ambience.sample_invertible();
         return Self::compose(c, x, ambience);
     }

@@ -9,10 +9,11 @@
 //! - [ ] Ballot validity challenge
 //! - [ ] Tally and decryption
 //! - [ ] Tally challenge
-use crypto_bigint::U256;
+use crypto_bigint::Uint;
 
 /// Use the same big integer type everywhere
-pub type BigInt = U256;
+const LIMBS: usize = 4; // 4 words each 64 bits, a total of 256 bits
+pub type BigInt = Uint<LIMBS>;
 
 pub mod arithmetics;
 pub mod keys;

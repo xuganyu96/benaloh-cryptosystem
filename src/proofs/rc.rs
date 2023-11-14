@@ -7,6 +7,8 @@
 //! challenge: b <- 0..r
 //! response: c' + bc
 //! verify: w^bw'y^(c' + bc) is an r-th residue
+//!
+//! TODO: Increase the confidence of each proof by using a larger commit
 
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
@@ -43,13 +45,13 @@ impl Proof {
 
     /// Instantiate with a statement alone. The commit will be randomly generated
     pub fn from_statement(statement: HigherResidue) -> Self {
-        let commit = HigherResidue::random(statement.get_ambience());
+        let commit = HigherResidue::random(None, statement.get_ambience());
         return Self::new(statement, commit);
     }
 
     /// Generate a new instance of a commit and replace the old commit
     pub fn refresh_commit(&mut self) {
-        let commit = HigherResidue::random(self.get_statement().get_ambience());
+        let commit = HigherResidue::random(None, self.get_statement().get_ambience());
         self.commit = commit;
     }
 
@@ -118,7 +120,7 @@ mod tests {
     #[test]
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
-        let proof = Proof::from_statement(HigherResidue::random(keypair.get_pk()));
+        let proof = Proof::from_statement(HigherResidue::random(None, keypair.get_pk()));
         let challenge = Challenge::generate(keypair.clone());
         assert!(challenge.verify(&proof, &proof.respond(&challenge)));
     }
