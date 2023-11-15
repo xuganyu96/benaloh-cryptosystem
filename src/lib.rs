@@ -1,12 +1,12 @@
 //! Libraries for higher residue arithmetics
 //!
-//! - [ ] Parameter generation
-//!     - [ ] Generate random prime r
-//!     - [ ] Generate related prime p, q and compute n, phi
-//!     - [ ] Generate y
-//! - [ ] Parameter challenge
+//! - [x] Parameter generation
+//!     - [x] Generate random prime r
+//!     - [x] Generate related prime p, q and compute n, phi
+//!     - [x] Generate y
+//! - [x] Parameter challenge
 //! - [ ] Encryption
-//! - [ ] Ballot validity challenge
+//! - [x] Ballot validity challenge
 //! - [ ] Tally and decryption
 //! - [ ] Tally challenge
 use crypto_bigint::Uint;
