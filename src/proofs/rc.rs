@@ -81,13 +81,13 @@ impl Challenge {
     }
 
     /// Generate a random challenge
-    pub fn generate(keypair: KeyPair) -> Self {
+    pub fn generate(keypair: &KeyPair) -> Self {
         let r = NonZero::new(keypair.get_pk().get_r().clone()).unwrap();
         let challenge = BigInt::random_mod(&mut OsRng, &r);
         let challenge =
             DynResidue::new(&challenge, DynResidueParams::new(keypair.get_pk().get_r()));
 
-        return Self::new(challenge, keypair);
+        return Self::new(challenge, keypair.clone());
     }
 
     /// Get a copy of the challenge
@@ -124,7 +124,7 @@ mod tests {
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
         let proof = Proof::from_statement(ClearResidue::random(None, keypair.get_pk()));
-        let challenge = Challenge::generate(keypair.clone());
+        let challenge = Challenge::generate(&keypair);
         assert!(challenge.verify(&proof, &proof.respond(&challenge)));
     }
 }

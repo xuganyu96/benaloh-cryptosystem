@@ -12,7 +12,7 @@
 use crypto_bigint::Uint;
 
 /// Use the same big integer type everywhere
-const LIMBS: usize = 4; // 4 words each 64 bits, a total of 256 bits
+pub const LIMBS: usize = 4; // 4 words each 64 bits, a total of 256 bits
 pub type BigInt = Uint<LIMBS>;
 
 pub mod arithmetics;

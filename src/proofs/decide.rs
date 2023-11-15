@@ -40,18 +40,12 @@ impl Challenge {
 
 /// The prover possesses the keypair, which is used to decompose the challenge ciphertext into the
 /// residue class and the witness
-pub struct Proof {
-    keypair: KeyPair,
-}
+pub struct Proof;
 
 impl Proof {
-    pub fn new(keypair: KeyPair) -> Self {
-        return Self { keypair };
-    }
-
-    pub fn respond(&self, challenge: &Challenge) -> BigInt {
+    pub fn respond(challenge: &Challenge, keypair: &KeyPair) -> BigInt {
         let challenge = challenge.get_challenge().get_val();
-        let decomp = ClearResidue::decompose(challenge.clone(), &self.keypair);
+        let decomp = ClearResidue::decompose(challenge.clone(), &keypair);
         return decomp.get_rc().retrieve();
     }
 }
@@ -65,7 +59,6 @@ mod test {
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
         let challenge = Challenge::generate(keypair.get_pk());
-        let proof = Proof::new(keypair);
-        assert!(challenge.verify(&proof.respond(&challenge)));
+        assert!(challenge.verify(&Proof::respond(&challenge, &keypair)));
     }
 }

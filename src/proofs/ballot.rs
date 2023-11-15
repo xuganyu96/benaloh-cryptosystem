@@ -150,7 +150,7 @@ impl Proof {
         });
     }
 
-    pub fn validate_response(
+    pub fn verify(
         statement: &ClearResidue,
         commitment: &[Capsule],
         responses: &[Response],
@@ -240,20 +240,16 @@ mod tests {
     #[test]
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
-        let one = DynResidue::new(
-            &BigInt::ONE,
-            DynResidueParams::new(keypair.get_pk().get_r()),
-        );
-        let statement = ClearResidue::random(Some(one), keypair.get_pk());
         let n = DynResidueParams::new(keypair.get_pk().get_n());
         let zero = DynResidue::new(&BigInt::ZERO, n);
         let one = DynResidue::new(&BigInt::ONE, n);
+        let statement = ClearResidue::random(Some(one), keypair.get_pk());
         let classes = vec![zero, one];
         let confidence = 256usize;
         let commitment = Proof::generate_commitment(&statement, &classes, confidence);
         let challenge = Proof::generate_challenge(&commitment);
         let response = Proof::respond(&statement, &commitment, &challenge);
-        let validated = Proof::validate_response(&statement, &commitment, &response);
+        let validated = Proof::verify(&statement, &commitment, &response);
         assert!(validated);
     }
 }
