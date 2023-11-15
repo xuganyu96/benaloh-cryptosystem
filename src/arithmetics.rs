@@ -10,11 +10,13 @@ use crypto_bigint::{
 };
 use std::ops::Deref;
 
-/// A wrapper around dynamic residue parameter (the modulus)
+/// A ring modulus defines the integer ring (mod r). Integer addition and multiplication are
+/// defined. Not all integers are invertible. Ring modulus is usually used as exponents,
+/// such as residue classes
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub struct Modulus(DynResidueParams<LIMBS>);
+pub struct RingModulus(DynResidueParams<LIMBS>);
 
-impl Deref for Modulus {
+impl Deref for RingModulus {
     type Target = DynResidueParams<LIMBS>;
 
     fn deref(&self) -> &Self::Target {
@@ -22,7 +24,7 @@ impl Deref for Modulus {
     }
 }
 
-impl Modulus {
+impl RingModulus {
     /// Clone the inner dynamic residue parameter
     pub fn to_dyn_residue_params(&self) -> DynResidueParams<LIMBS> {
         return self.0.clone();
@@ -31,6 +33,52 @@ impl Modulus {
     /// Clone the inner big integer
     pub fn to_uint(&self) -> BigInt {
         return self.0.modulus().clone();
+    }
+
+    /// Sample a random element in the integer ring
+    pub fn sample(&self) -> DynResidue<LIMBS> {
+        return DynResidue::new(&BigInt::random(&mut OsRng), self.to_dyn_residue_params());
+    }
+
+    pub fn new(modulus: DynResidueParams<LIMBS>) -> Self {
+        return Self(modulus);
+    }
+}
+
+/// A group modulus defines the multiplicative group Z/n of invertible elements.
+/// With group modulus, multiplication is the only defined operation. All elements are invertible
+/// so we can sample from them
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub struct GroupModulus(DynResidueParams<LIMBS>);
+
+impl Deref for GroupModulus {
+    type Target = DynResidueParams<LIMBS>;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl GroupModulus {
+    /// Clone the inner dynamic residue parameter
+    pub fn to_dyn_residue_params(&self) -> DynResidueParams<LIMBS> {
+        return self.0.clone();
+    }
+
+    /// Clone the inner big integer
+    pub fn to_uint(&self) -> BigInt {
+        return self.0.modulus().clone();
+    }
+
+    /// Sample a random invertible element
+    pub fn sample(&self) -> DynResidue<LIMBS> {
+        loop {
+            let val = DynResidue::new(&BigInt::random(&mut OsRng), self.to_dyn_residue_params());
+            let (_, invertible) = val.invert();
+            if invertible.into() {
+                return val;
+            }
+        }
     }
 
     pub fn new(modulus: DynResidueParams<LIMBS>) -> Self {
@@ -146,10 +194,9 @@ impl ClearResidue {
 
     /// Generate a random member of Z_n, including its decomposition
     pub fn random(class: Option<DynResidue<LIMBS>>, ambience: &PublicKey) -> Self {
-        let r = ambience.get_r().to_dyn_residue_params();
         let c = match class {
             Some(class) => class,
-            None => DynResidue::new(&BigInt::random(&mut OsRng), r),
+            None => ambience.get_r().sample(),
         };
         let x = ambience.sample_invertible();
         return Self::compose(c, x, ambience);

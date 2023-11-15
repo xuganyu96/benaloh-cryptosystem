@@ -10,12 +10,12 @@
 //!
 //! TODO: Increase the confidence of each proof by using a larger commit
 
-use crypto_bigint::{modular::runtime_mod::DynResidue, rand_core::OsRng, Random};
+use crypto_bigint::modular::runtime_mod::DynResidue;
 
 use crate::{
     arithmetics::{rth_root, ClearResidue},
     keys::KeyPair,
-    BigInt, LIMBS,
+    LIMBS,
 };
 
 /// The data used by the prover
@@ -78,10 +78,7 @@ impl Challenge {
 
     /// Generate a random challenge
     pub fn generate(keypair: &KeyPair) -> Self {
-        let challenge = DynResidue::new(
-            &BigInt::random(&mut OsRng),
-            keypair.get_pk().get_r().to_dyn_residue_params(),
-        );
+        let challenge = keypair.get_pk().get_r().sample();
 
         return Self::new(challenge, keypair.clone());
     }

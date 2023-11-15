@@ -1,12 +1,12 @@
 //! The key pairs
 use crate::{
-    arithmetics::{self, Modulus},
+    arithmetics::{self, RingModulus},
     BigInt, LIMBS,
 };
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
-    CheckedAdd, CheckedMul, CheckedSub, NonZero, Random, RandomMod,
+    CheckedAdd, CheckedMul, CheckedSub, NonZero, RandomMod,
 };
 
 /// The public key includes the ring size r, and group modulus n, and the residue class
@@ -17,7 +17,7 @@ use crypto_bigint::{
 /// 4. y is an invertible element but not an r-th residue
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct PublicKey {
-    r: Modulus,
+    r: RingModulus,
     n: BigInt,
 
     /// y is an element of the multiplicative group Z/n, but with the type DynResidue instead of a
@@ -27,11 +27,11 @@ pub struct PublicKey {
 
 impl PublicKey {
     /// Instantiate an instance with no check
-    pub fn new(r: Modulus, n: BigInt, y: DynResidue<LIMBS>) -> Self {
+    pub fn new(r: RingModulus, n: BigInt, y: DynResidue<LIMBS>) -> Self {
         return Self { r, n, y };
     }
 
-    pub fn get_r(&self) -> &Modulus {
+    pub fn get_r(&self) -> &RingModulus {
         &self.r
     }
 
@@ -199,18 +199,18 @@ impl KeyPair {
     /// reference: 2 ** 33 ~= 8.58 billion, 2 ** 29 >= 300 million
     pub fn keygen(ring_size: usize, modulus_size: usize, safe: bool) -> Self {
         let r: BigInt = crypto_primes::generate_prime(Some(ring_size));
-        let r = Modulus::new(DynResidueParams::new(&r));
+        let r = RingModulus::new(DynResidueParams::new(&r));
         let xbound = DynResidue::new(&BigInt::from_u8(2), DynResidueParams::new(&BigInt::MAX))
             .pow(&BigInt::from_u64(modulus_size as u64))
             .retrieve(); // x is the dominant term in the arithmetic sequence
                          // Generate the non-zero remainder in the arithmetic sequence
 
         // Generate the remainder term "b"
-        let mut b =
-            DynResidue::new(&BigInt::random(&mut OsRng), r.to_dyn_residue_params()).retrieve();
-        while b == BigInt::ZERO {
-            b = DynResidue::new(&BigInt::random(&mut OsRng), r.to_dyn_residue_params()).retrieve();
+        let mut b = r.sample();
+        while b.retrieve() == BigInt::ZERO {
+            b = r.sample();
         }
+        let b = b.retrieve();
 
         let q = Self::generate_q(r.modulus(), xbound, b, safe);
         let p = Self::generate_p(r.modulus(), xbound, b, safe);
