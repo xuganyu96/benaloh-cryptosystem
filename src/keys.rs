@@ -1,21 +1,30 @@
 //! The key pairs
-use crate::BigInt;
+use crate::{arithmetics, BigInt, LIMBS};
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
     CheckedAdd, CheckedMul, CheckedSub, NonZero, RandomMod,
 };
 
+/// The public key includes the ring size r, and group modulus n, and the residue class
+/// discriminator y. In this implementation, a public key is always a perfect consonance, meaning
+/// 1. r divides phi
+/// 2. r and phi/r are relatively prime
+/// 3. r is a prime number
+/// 4. y is an invertible element but not an r-th residue
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct PublicKey {
     r: BigInt,
     n: BigInt,
-    y: BigInt,
+
+    /// y is an element of the multiplicative group Z/n, but with the type DynResidue instead of a
+    /// naked BigInt
+    y: DynResidue<LIMBS>,
 }
 
 impl PublicKey {
     /// Instantiate an instance with no check
-    pub fn new(r: BigInt, n: BigInt, y: BigInt) -> Self {
+    pub fn new(r: BigInt, n: BigInt, y: DynResidue<LIMBS>) -> Self {
         return Self { r, n, y };
     }
 
@@ -27,22 +36,25 @@ impl PublicKey {
         &self.n
     }
 
-    pub fn get_y(&self) -> &BigInt {
+    pub fn get_y(&self) -> &DynResidue<LIMBS> {
         &self.y
     }
 
     /// Return the multiplicative inverse of y
-    pub fn invert_y(&self) -> BigInt {
-        let (y_inv, invertible) = self.y.inv_mod(self.get_n());
+    /// It should always be the case that y is invertible, but the uninvertible case is still
+    /// accounted for as idiomatic Rust
+    pub fn invert_y(&self) -> Option<DynResidue<LIMBS>> {
+        let (y_inv, invertible) = self.y.invert();
         if invertible.into() {
-            return y_inv;
+            return Some(y_inv);
         }
-        panic!("y is not invertible");
+        return None;
     }
 
     /// Sample a random element from the multiplicative group Z/n
-    pub fn sample_invertible(&self) -> BigInt {
-        return KeyPair::sample_invertible(self.n);
+    pub fn sample_invertible(&self) -> DynResidue<LIMBS> {
+        let n = DynResidueParams::new(self.get_n());
+        return arithmetics::sample_invertible(n);
     }
 }
 
@@ -145,49 +157,18 @@ impl KeyPair {
         return q;
     }
 
-    /// Sample from the multiplicative group (mod n)
-    /// TODO: move this somewhere more accessible
-    fn sample_invertible(modulus: BigInt) -> BigInt {
-        loop {
-            let y = BigInt::random_mod(&mut OsRng, &NonZero::new(modulus).unwrap());
-            let (_, invertible) = y.inv_mod(&modulus);
-            if invertible.into() {
-                return y;
-            }
-        }
-    }
-
     /// Sample a non-residue. A non-residue is an invertible element such that
     /// y^{phi/r} != 1 (mod n)
-    fn sample_nonresidue(modulus: BigInt, r: BigInt, phi: BigInt) -> BigInt {
-        let quotient = phi.checked_div(&r).unwrap();
+    fn sample_nonresidue(modulus: &BigInt, r: &BigInt, phi: &BigInt) -> DynResidue<LIMBS> {
+        let quotient = phi.checked_div(r).unwrap();
+        let modulus = DynResidueParams::new(modulus);
 
         loop {
-            let y = Self::sample_invertible(modulus);
-            if DynResidue::new(&y, DynResidueParams::new(&modulus))
-                .pow(&quotient)
-                .retrieve()
-                != BigInt::ONE
-            {
+            let y = arithmetics::sample_invertible(modulus);
+            if y.pow(&quotient).retrieve() != BigInt::ONE {
                 return y;
             }
         }
-    }
-
-    /// Given that (r, n, y) is prime consonance, we can use the secret key to efficiently find the
-    /// r-th root of some r-th residue using the following relation:
-    /// A * r + B * (phi / r) = 1,
-    /// Notice that A is r's multiplicative inverse modulus (phi / r) and is dependent only on the
-    /// keypair, so we can compute it ahead of time
-    pub fn get_rth_root_exp(&self) -> BigInt {
-        let r = self.pk.r;
-        let phi = self.sk.phi;
-        let phi_over_r = phi.checked_div(&r).unwrap();
-        let (root_exp, is_invertible) = r.inv_mod(&phi_over_r);
-        if is_invertible.into() {
-            return root_exp;
-        }
-        panic!("r, phi/r not relatively prime");
     }
 
     /// Assuming that (r, n, y) is prime consonance, check that it is also perfect consonance.
@@ -234,7 +215,7 @@ impl KeyPair {
             .unwrap()
             .checked_mul(&q.checked_sub(&BigInt::ONE).unwrap())
             .unwrap();
-        let y = Self::sample_nonresidue(n, r, phi);
+        let y = Self::sample_nonresidue(&n, &r, &phi);
 
         return Self::new(PublicKey::new(r, n, y), SecretKey::new(phi));
     }

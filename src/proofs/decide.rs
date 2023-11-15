@@ -7,34 +7,34 @@
 //! TODO: Increase the confidence of each proof by using a larger commit
 
 use crate::{
-    arithmetics::HigherResidue,
+    arithmetics::ClearResidue,
     keys::{KeyPair, PublicKey},
     BigInt,
 };
 
 /// The challenge ciphertext is a transparent high residue (where the residue class is known).
 pub struct Challenge {
-    challenge: HigherResidue,
+    challenge: ClearResidue,
 }
 
 impl Challenge {
-    pub fn new(challenge: HigherResidue) -> Self {
+    pub fn new(challenge: ClearResidue) -> Self {
         return Self { challenge };
     }
 
     pub fn generate(pk: &PublicKey) -> Self {
-        let challenge = HigherResidue::random(None, pk);
+        let challenge = ClearResidue::random(None, pk);
         return Self::new(challenge);
     }
 
-    pub fn get_challenge(&self) -> &HigherResidue {
+    pub fn get_challenge(&self) -> &ClearResidue {
         return &self.challenge;
     }
 
     /// Verify that the response is the correct residue class. This function assumes that the
     /// response is an integer mod r
     pub fn verify(&self, response: &BigInt) -> bool {
-        return self.challenge.get_rc() == response;
+        return self.challenge.get_rc().retrieve() == *response;
     }
 }
 
@@ -51,8 +51,8 @@ impl Proof {
 
     pub fn respond(&self, challenge: &Challenge) -> BigInt {
         let challenge = challenge.get_challenge().get_val();
-        let decomp = HigherResidue::decompose(*challenge, &self.keypair);
-        return decomp.get_rc().clone();
+        let decomp = ClearResidue::decompose(challenge.clone(), &self.keypair);
+        return decomp.get_rc().retrieve();
     }
 }
 

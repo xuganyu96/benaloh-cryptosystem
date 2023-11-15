@@ -1,39 +1,39 @@
 //! Convenience functions for arithmetics
 use crate::{
     keys::{KeyPair, PublicKey},
-    BigInt,
+    BigInt, LIMBS,
 };
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
-    CheckedAdd, NonZero, RandomMod,
+    CheckedAdd, Random,
 };
 
-/// The principle unit of arithmetic in Benaloh's cryptosystem.
-/// A residue is an element of the multiplicative group Z/n, but because the triplet (r, n, y) is
-/// perfect consonance, every element has unique representation:
-/// w = y^cx^r
-/// for some 0 <= c < r and some x in Z/n.
-///
-/// NOTE: this is basically a "transparent" ciphertext. We will probably need a opaque ciphertext
+/// A clear residue contains the value and its decomposition into the residue class and witness
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct HigherResidue {
-    /// The value itself
-    val: BigInt,
+pub struct ClearResidue {
+    /// The value itself, as an invertible number (mod n)
+    val: DynResidue<LIMBS>,
 
-    /// The residue class, that this value belongs to
-    rc: BigInt,
+    /// The residue class that this value belongs to, unique up to (mod r)
+    rc: DynResidue<LIMBS>,
 
-    /// The witness, which is an r-th root of val * (y ** rc) (mod n)
-    witness: BigInt,
+    /// The r-th root of val * (y ** -rc); the "x" in w = (y ** c) * (x ** r).
+    /// An invertible integer under (mod n)
+    witness: DynResidue<LIMBS>,
 
     /// A copy of the ambient primes (r, n, y)
     /// TODO: convert this into a reference to reduce copying
     ambience: PublicKey,
 }
 
-impl HigherResidue {
-    pub fn new(val: BigInt, rc: BigInt, witness: BigInt, ambience: &PublicKey) -> Self {
+impl ClearResidue {
+    pub fn new(
+        val: DynResidue<LIMBS>,
+        rc: DynResidue<LIMBS>,
+        witness: DynResidue<LIMBS>,
+        ambience: &PublicKey,
+    ) -> Self {
         let ambience = ambience.clone();
         return Self {
             val,
@@ -51,17 +51,14 @@ impl HigherResidue {
     /// (phi/n) gives 1 (mod n) by Euler's theorem. From here, we can use a brute-force discrete
     /// log algorithm to find the value of the residue class. Finally, onec the residue class is
     /// found, we can recover the witness.
-    pub fn decompose(val: BigInt, keypair: &KeyPair) -> Self {
+    pub fn decompose(val: DynResidue<LIMBS>, keypair: &KeyPair) -> Self {
         let phi_over_r = keypair
             .get_sk()
             .get_phi()
             .checked_div(keypair.get_pk().get_r())
             .unwrap();
-        let n = DynResidueParams::new(keypair.get_pk().get_n());
-        let y_to_phi_over_r = DynResidue::new(keypair.get_pk().get_y(), n)
-            .pow(&phi_over_r)
-            .retrieve();
-        let val_to_phi_over_r = DynResidue::new(&val, n).pow(&phi_over_r).retrieve();
+        let y_to_phi_over_r = keypair.get_pk().get_y().pow(&phi_over_r).retrieve();
+        let val_to_phi_over_r = val.pow(&phi_over_r).retrieve();
         let rc = discrete_log(
             &y_to_phi_over_r,
             &val_to_phi_over_r,
@@ -69,38 +66,43 @@ impl HigherResidue {
             keypair.get_pk().get_n(),
         )
         .unwrap();
-        let val = DynResidue::new(&val, n);
-        let witness = DynResidue::new(&keypair.get_pk().invert_y(), n).pow(&rc);
-        let witness = val.mul(&witness).retrieve();
-        let witness = rth_root(witness, keypair).unwrap();
+        let rc = DynResidue::new(&rc, DynResidueParams::new(keypair.get_pk().get_r()));
+        let witness = keypair.get_pk().invert_y().unwrap().pow(&rc.retrieve());
+        let witness = val.mul(&witness);
+        let witness = rth_root(
+            witness,
+            keypair.get_pk().get_r(),
+            keypair.get_sk().get_phi(),
+        )
+        .unwrap();
 
-        return Self::new(val.retrieve(), rc, witness, keypair.get_pk());
+        return Self::new(val, rc, witness, keypair.get_pk());
     }
 
     /// Construct a higher residue from its decomposition
-    pub fn compose(rc: BigInt, witness: BigInt, ambience: &PublicKey) -> Self {
-        let n = DynResidueParams::new(ambience.get_n());
-        let z = DynResidue::new(&witness, n) // z is (x ** r)
+    pub fn compose(
+        rc: DynResidue<LIMBS>,
+        witness: DynResidue<LIMBS>,
+        ambience: &PublicKey,
+    ) -> Self {
+        let z = witness // z is (x ** r)
             .pow(ambience.get_r());
-        let val = DynResidue::new(ambience.get_y(), n)
-            .pow(&rc)
-            .mul(&z)
-            .retrieve();
+        let val = ambience.get_y().pow(&rc.retrieve()).mul(&z);
         return Self::new(val, rc, witness, ambience);
     }
 
     /// Return a reference to the element itself
-    pub fn get_val(&self) -> &BigInt {
+    pub fn get_val(&self) -> &DynResidue<LIMBS> {
         return &self.val;
     }
 
     /// Return a reference to the residue class
-    pub fn get_rc(&self) -> &BigInt {
+    pub fn get_rc(&self) -> &DynResidue<LIMBS> {
         return &self.rc;
     }
 
     /// Return a reference to the witness
-    pub fn get_witness(&self) -> &BigInt {
+    pub fn get_witness(&self) -> &DynResidue<LIMBS> {
         return &self.witness;
     }
 
@@ -110,11 +112,11 @@ impl HigherResidue {
     }
 
     /// Generate a random member of Z_n, including its decomposition
-    pub fn random(class: Option<BigInt>, ambience: &PublicKey) -> Self {
-        let r = NonZero::new(ambience.get_r().clone()).unwrap();
+    pub fn random(class: Option<DynResidue<LIMBS>>, ambience: &PublicKey) -> Self {
+        let r = DynResidueParams::new(ambience.get_r());
         let c = match class {
             Some(class) => class,
-            None => BigInt::random_mod(&mut OsRng, &r),
+            None => DynResidue::new(&BigInt::random(&mut OsRng), r),
         };
         let x = ambience.sample_invertible();
         return Self::compose(c, x, ambience);
@@ -128,13 +130,29 @@ impl HigherResidue {
 ///
 /// Note that this relationship only holds if the PublicKey is perfectly consonant.
 /// Also note that this can also be used to check that something is an r-th residue
-pub fn rth_root(z: BigInt, keypair: &KeyPair) -> Option<BigInt> {
-    let root_exp = keypair.get_rth_root_exp();
-    let root = DynResidue::new(&z, DynResidueParams::new(keypair.get_pk().get_n())).pow(&root_exp);
-    if root.pow(keypair.get_pk().get_r()).retrieve() == z {
-        return Some(root.retrieve());
+pub fn rth_root(z: DynResidue<LIMBS>, r: &BigInt, phi: &BigInt) -> Option<DynResidue<LIMBS>> {
+    let phi_over_r = phi.checked_div(&r).unwrap();
+    let (root_exp, r_invertible) = r.inv_mod(&phi_over_r);
+    let r_invertible: bool = r_invertible.into();
+    if !r_invertible {
+        panic!("r and phi/r not relatively prime");
+    }
+    let root = z.pow(&root_exp);
+    if root.pow(r) == z {
+        return Some(root);
     }
     return None;
+}
+
+/// Sample a random element from the multiplicative group Z/n
+pub fn sample_invertible(modulus: DynResidueParams<LIMBS>) -> DynResidue<LIMBS> {
+    loop {
+        let val = DynResidue::new(&BigInt::random(&mut OsRng), modulus);
+        let (_, invertible) = val.invert();
+        if invertible.into() {
+            return val;
+        }
+    }
 }
 
 /// Brute-force discrete log given that the base has small order under the modulus.
@@ -173,7 +191,12 @@ mod tests {
     #[test]
     fn test_rth_root() {
         let keypair = KeyPair::keygen(RINGSIZE, MODSIZE, SAFEPRIME);
-        let root = rth_root(BigInt::ONE, &keypair); // 1 is always an r-th residue
+        let one = DynResidue::new(
+            &BigInt::ONE,
+            DynResidueParams::new(keypair.get_pk().get_n()),
+        );
+        // 1 is always an r-th residue
+        let root = rth_root(one, keypair.get_pk().get_r(), keypair.get_sk().get_phi());
         assert!(root.is_some());
 
         // y^e for 1 <= e < r is never an r-th residue
@@ -185,12 +208,12 @@ mod tests {
             if e == BigInt::ZERO {
                 continue;
             }
-            let base = DynResidue::new(
-                keypair.get_pk().get_y(),
-                DynResidueParams::new(keypair.get_pk().get_n()),
+            let nonresidue = keypair.get_pk().get_y().pow(&e);
+            let nonroot = rth_root(
+                nonresidue,
+                keypair.get_pk().get_r(),
+                keypair.get_sk().get_phi(),
             );
-            let nonresidue = base.pow(&e);
-            let nonroot = rth_root(nonresidue.retrieve(), &keypair);
             assert!(nonroot.is_none());
         }
     }

@@ -13,55 +13,53 @@
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
-    CheckedAdd, CheckedMul, NonZero, RandomMod,
+    NonZero, RandomMod,
 };
 
 use crate::{
-    arithmetics::{rth_root, HigherResidue},
+    arithmetics::{rth_root, ClearResidue},
     keys::KeyPair,
-    BigInt,
+    BigInt, LIMBS,
 };
 
 /// The data used by the prover
 #[derive(Debug, Eq, PartialEq)]
 pub struct Proof {
-    statement: HigherResidue,
-    commit: HigherResidue,
+    statement: ClearResidue,
+    commit: ClearResidue,
 }
 
 impl Proof {
     /// Convenience function for instantiating an instance
-    pub fn new(statement: HigherResidue, commit: HigherResidue) -> Self {
+    pub fn new(statement: ClearResidue, commit: ClearResidue) -> Self {
         return Self { statement, commit };
     }
 
-    pub fn get_statement(&self) -> &HigherResidue {
+    pub fn get_statement(&self) -> &ClearResidue {
         return &self.statement;
     }
 
-    pub fn get_commit(&self) -> &HigherResidue {
+    pub fn get_commit(&self) -> &ClearResidue {
         return &self.commit;
     }
 
     /// Instantiate with a statement alone. The commit will be randomly generated
-    pub fn from_statement(statement: HigherResidue) -> Self {
-        let commit = HigherResidue::random(None, statement.get_ambience());
+    pub fn from_statement(statement: ClearResidue) -> Self {
+        let commit = ClearResidue::random(None, statement.get_ambience());
         return Self::new(statement, commit);
     }
 
     /// Generate a new instance of a commit and replace the old commit
     pub fn refresh_commit(&mut self) {
-        let commit = HigherResidue::random(None, self.get_statement().get_ambience());
+        let commit = ClearResidue::random(None, self.get_statement().get_ambience());
         self.commit = commit;
     }
 
     /// Respond to a challenge
-    pub fn respond(&self, challenge: &Challenge) -> BigInt {
+    pub fn respond(&self, challenge: &Challenge) -> DynResidue<LIMBS> {
         let c_prime = self.commit.get_rc();
         let c_true = self.statement.get_rc();
-        return c_prime
-            .checked_add(&c_true.checked_mul(challenge.get_challenge()).unwrap())
-            .unwrap();
+        return c_prime.add(&c_true.mul(challenge.get_challenge()));
     }
 }
 
@@ -69,7 +67,7 @@ impl Proof {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Challenge {
     /// The challenge "b", an element of the integer ring Z/r
-    challenge: BigInt,
+    challenge: DynResidue<LIMBS>,
 
     /// In the context of this proof, the verifier needs the secret key (particularly phi) to
     /// decide whether the response leads to a valid r-th residue
@@ -78,7 +76,7 @@ pub struct Challenge {
 }
 
 impl Challenge {
-    pub fn new(challenge: BigInt, keypair: KeyPair) -> Self {
+    pub fn new(challenge: DynResidue<LIMBS>, keypair: KeyPair) -> Self {
         return Self { challenge, keypair };
     }
 
@@ -86,29 +84,34 @@ impl Challenge {
     pub fn generate(keypair: KeyPair) -> Self {
         let r = NonZero::new(keypair.get_pk().get_r().clone()).unwrap();
         let challenge = BigInt::random_mod(&mut OsRng, &r);
+        let challenge =
+            DynResidue::new(&challenge, DynResidueParams::new(keypair.get_pk().get_r()));
 
         return Self::new(challenge, keypair);
     }
 
     /// Get a copy of the challenge
-    pub fn get_challenge(&self) -> &BigInt {
+    pub fn get_challenge(&self) -> &DynResidue<LIMBS> {
         return &self.challenge;
     }
 
     /// Return true iff the response is valid
     /// The response is valid for the proof if and only if:
     /// (statement) * (commit) / (y ** response) is an r-th residue
-    pub fn verify(&self, proof: &Proof, response: &BigInt) -> bool {
-        let n = DynResidueParams::new(self.keypair.get_pk().get_n());
-        let y_inv = DynResidue::new(&self.keypair.get_pk().invert_y(), n);
-        let statement = DynResidue::new(proof.get_statement().get_val(), n);
-        let commit = DynResidue::new(proof.get_commit().get_val(), n);
+    pub fn verify(&self, proof: &Proof, response: &DynResidue<LIMBS>) -> bool {
+        let y_inv = &self.keypair.get_pk().invert_y().unwrap();
+        let statement = proof.get_statement().get_val();
+        let commit = proof.get_commit().get_val();
         let witness = statement
-            .pow(self.get_challenge())
+            .pow(&self.get_challenge().retrieve())
             .mul(&commit)
-            .mul(&y_inv.pow(response))
-            .retrieve();
-        return rth_root(witness, &self.keypair).is_some();
+            .mul(&y_inv.pow(&response.retrieve()));
+        return rth_root(
+            witness,
+            self.keypair.get_pk().get_r(),
+            self.keypair.get_sk().get_phi(),
+        )
+        .is_some();
     }
 }
 
@@ -120,7 +123,7 @@ mod tests {
     #[test]
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
-        let proof = Proof::from_statement(HigherResidue::random(None, keypair.get_pk()));
+        let proof = Proof::from_statement(ClearResidue::random(None, keypair.get_pk()));
         let challenge = Challenge::generate(keypair.clone());
         assert!(challenge.verify(&proof, &proof.respond(&challenge)));
     }
