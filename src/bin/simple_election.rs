@@ -36,8 +36,8 @@ fn main() {
     }
 
     // Generate the ballots, and for each time,
-    let r = DynResidueParams::new(keypair.get_pk().get_r());
     let n = DynResidueParams::new(keypair.get_pk().get_n());
+    let r = keypair.get_pk().get_r().to_dyn_residue_params();
     let mut ballots: Vec<DynResidue<LIMBS>> = vec![];
     let mut true_tally = DynResidue::new(&BigInt::ZERO, r);
     let valid_residue_classes = vec![
@@ -88,7 +88,8 @@ fn main() {
         &keypair,
     );
     let commitment = proofs::tally::Proof::generate_commitment(n, keypair.get_pk());
-    let challenge = proofs::tally::Proof::generate_challenge(&commitment, keypair.get_pk().get_r());
+    let challenge =
+        proofs::tally::Proof::generate_challenge(&commitment, keypair.get_pk().get_r().modulus());
     let response = proofs::tally::Proof::respond(&statement, &commitment, &challenge);
     let validated = proofs::tally::Proof::verify(
         &statement,

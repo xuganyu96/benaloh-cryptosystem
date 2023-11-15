@@ -10,11 +10,7 @@
 //!
 //! TODO: Increase the confidence of each proof by using a larger commit
 
-use crypto_bigint::{
-    modular::runtime_mod::{DynResidue, DynResidueParams},
-    rand_core::OsRng,
-    NonZero, RandomMod,
-};
+use crypto_bigint::{modular::runtime_mod::DynResidue, rand_core::OsRng, Random};
 
 use crate::{
     arithmetics::{rth_root, ClearResidue},
@@ -82,10 +78,10 @@ impl Challenge {
 
     /// Generate a random challenge
     pub fn generate(keypair: &KeyPair) -> Self {
-        let r = NonZero::new(keypair.get_pk().get_r().clone()).unwrap();
-        let challenge = BigInt::random_mod(&mut OsRng, &r);
-        let challenge =
-            DynResidue::new(&challenge, DynResidueParams::new(keypair.get_pk().get_r()));
+        let challenge = DynResidue::new(
+            &BigInt::random(&mut OsRng),
+            keypair.get_pk().get_r().to_dyn_residue_params(),
+        );
 
         return Self::new(challenge, keypair.clone());
     }
@@ -108,7 +104,7 @@ impl Challenge {
             .mul(&y_inv.pow(&response.retrieve()));
         return rth_root(
             witness,
-            self.keypair.get_pk().get_r(),
+            self.keypair.get_pk().get_r().modulus(),
             self.keypair.get_sk().get_phi(),
         )
         .is_some();

@@ -41,7 +41,7 @@ impl Proof {
     /// the r-th power
     pub fn generate_commitment(n: DynResidueParams<LIMBS>, ambience: &PublicKey) -> ClearResidue {
         let x_prime = arithmetics::sample_invertible(n);
-        let zero = DynResidue::new(&BigInt::ZERO, DynResidueParams::new(ambience.get_r()));
+        let zero = DynResidue::new(&BigInt::ZERO, ambience.get_r().to_dyn_residue_params());
         return ClearResidue::compose(zero, x_prime, ambience);
     }
 
@@ -77,7 +77,7 @@ impl Proof {
         response: &DynResidue<LIMBS>,
         ambience: &PublicKey,
     ) -> bool {
-        let lhs = response.pow(ambience.get_r());
+        let lhs = response.pow(ambience.get_r().modulus());
         let rhs = statement
             .get_val()
             .pow(&challenge.retrieve())
@@ -96,12 +96,14 @@ mod tests {
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
         let n = DynResidueParams::new(keypair.get_pk().get_n());
-        let r = DynResidueParams::new(keypair.get_pk().get_r());
-        let zero = DynResidue::new(&BigInt::ZERO, r);
+        let zero = DynResidue::new(
+            &BigInt::ZERO,
+            keypair.get_pk().get_r().to_dyn_residue_params(),
+        );
         let witness = arithmetics::sample_invertible(n);
         let statement = ClearResidue::compose(zero, witness, keypair.get_pk());
         let commitment = Proof::generate_commitment(n, keypair.get_pk());
-        let challenge = Proof::generate_challenge(&commitment, keypair.get_pk().get_r());
+        let challenge = Proof::generate_challenge(&commitment, keypair.get_pk().get_r().modulus());
         let response = Proof::respond(&statement, &commitment, &challenge);
         let validated = Proof::verify(
             &statement,

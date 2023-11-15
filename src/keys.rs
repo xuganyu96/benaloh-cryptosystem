@@ -1,9 +1,12 @@
 //! The key pairs
-use crate::{arithmetics, BigInt, LIMBS};
+use crate::{
+    arithmetics::{self, Modulus},
+    BigInt, LIMBS,
+};
 use crypto_bigint::{
     modular::runtime_mod::{DynResidue, DynResidueParams},
     rand_core::OsRng,
-    CheckedAdd, CheckedMul, CheckedSub, NonZero, RandomMod,
+    CheckedAdd, CheckedMul, CheckedSub, NonZero, Random, RandomMod,
 };
 
 /// The public key includes the ring size r, and group modulus n, and the residue class
@@ -14,7 +17,7 @@ use crypto_bigint::{
 /// 4. y is an invertible element but not an r-th residue
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct PublicKey {
-    r: BigInt,
+    r: Modulus,
     n: BigInt,
 
     /// y is an element of the multiplicative group Z/n, but with the type DynResidue instead of a
@@ -24,11 +27,11 @@ pub struct PublicKey {
 
 impl PublicKey {
     /// Instantiate an instance with no check
-    pub fn new(r: BigInt, n: BigInt, y: DynResidue<LIMBS>) -> Self {
+    pub fn new(r: Modulus, n: BigInt, y: DynResidue<LIMBS>) -> Self {
         return Self { r, n, y };
     }
 
-    pub fn get_r(&self) -> &BigInt {
+    pub fn get_r(&self) -> &Modulus {
         &self.r
     }
 
@@ -95,7 +98,7 @@ impl KeyPair {
 
     /// generate p according to the arithmetic sequence:
     /// p = r * r * x + b * r + 1
-    fn generate_p(r: BigInt, xbound: BigInt, b: BigInt, safe: bool) -> BigInt {
+    fn generate_p(r: &BigInt, xbound: BigInt, b: BigInt, safe: bool) -> BigInt {
         let x = BigInt::random_mod(&mut OsRng, &NonZero::new(xbound).unwrap());
         let rrx = r.checked_mul(&r).unwrap().checked_mul(&x).unwrap();
         let rb = r.checked_mul(&b).unwrap();
@@ -133,7 +136,7 @@ impl KeyPair {
 
     /// Generate q according to the arithmetic sequence:
     /// q = r * x + b
-    fn generate_q(r: BigInt, xbound: BigInt, b: BigInt, safe: bool) -> BigInt {
+    fn generate_q(r: &BigInt, xbound: BigInt, b: BigInt, safe: bool) -> BigInt {
         let x = BigInt::random_mod(&mut OsRng, &NonZero::new(xbound).unwrap());
         let mut q = r.checked_mul(&x).unwrap().checked_add(&b).unwrap();
         let mut ready = {
@@ -176,7 +179,7 @@ impl KeyPair {
     /// 1. r divides phi
     /// 2. r and phi/r are relatively prime
     pub fn check_perfect_consonance(&self) -> bool {
-        let r = self.get_pk().get_r().clone();
+        let r = self.get_pk().get_r().modulus().clone();
         let phi = self.get_sk().get_phi();
         let divisible = phi % NonZero::new(r).unwrap() == BigInt::ZERO;
         let indivisible = (phi.checked_div(&r).unwrap()) % NonZero::new(r).unwrap() != BigInt::ZERO;
@@ -196,17 +199,21 @@ impl KeyPair {
     /// reference: 2 ** 33 ~= 8.58 billion, 2 ** 29 >= 300 million
     pub fn keygen(ring_size: usize, modulus_size: usize, safe: bool) -> Self {
         let r: BigInt = crypto_primes::generate_prime(Some(ring_size));
+        let r = Modulus::new(DynResidueParams::new(&r));
         let xbound = DynResidue::new(&BigInt::from_u8(2), DynResidueParams::new(&BigInt::MAX))
             .pow(&BigInt::from_u64(modulus_size as u64))
             .retrieve(); // x is the dominant term in the arithmetic sequence
                          // Generate the non-zero remainder in the arithmetic sequence
-        let mut b: BigInt = BigInt::random_mod(&mut OsRng, &NonZero::new(r).unwrap());
+
+        // Generate the remainder term "b"
+        let mut b =
+            DynResidue::new(&BigInt::random(&mut OsRng), r.to_dyn_residue_params()).retrieve();
         while b == BigInt::ZERO {
-            b = BigInt::random_mod(&mut OsRng, &NonZero::new(r).unwrap());
+            b = DynResidue::new(&BigInt::random(&mut OsRng), r.to_dyn_residue_params()).retrieve();
         }
 
-        let q = Self::generate_q(r, xbound, b, safe);
-        let p = Self::generate_p(r, xbound, b, safe);
+        let q = Self::generate_q(r.modulus(), xbound, b, safe);
+        let p = Self::generate_p(r.modulus(), xbound, b, safe);
 
         // Compute n and phi
         let n = p.checked_mul(&q).unwrap();
@@ -215,9 +222,18 @@ impl KeyPair {
             .unwrap()
             .checked_mul(&q.checked_sub(&BigInt::ONE).unwrap())
             .unwrap();
-        let y = Self::sample_nonresidue(&n, &r, &phi);
+        let y = Self::sample_nonresidue(&n, r.modulus(), &phi);
 
         return Self::new(PublicKey::new(r, n, y), SecretKey::new(phi));
+    }
+
+    /// A convenience method for computing the quantity phi/r (over the integers).
+    /// This quantity is guaranteed to be well-defined because this key pair generation ensures
+    /// that (r, n, y) is a perfect consonance
+    pub fn phi_over_r(&self) -> BigInt {
+        let phi = self.get_sk().get_phi();
+        let r = self.get_pk().get_r().modulus();
+        return phi.checked_div(r).unwrap();
     }
 }
 

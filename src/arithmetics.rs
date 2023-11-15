@@ -8,6 +8,43 @@ use crypto_bigint::{
     rand_core::OsRng,
     CheckedAdd, Random,
 };
+use std::ops::Deref;
+
+/// A wrapper around dynamic residue parameter (the modulus)
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub struct Modulus(DynResidueParams<LIMBS>);
+
+impl Deref for Modulus {
+    type Target = DynResidueParams<LIMBS>;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl Modulus {
+    /// Clone the inner dynamic residue parameter
+    pub fn to_dyn_residue_params(&self) -> DynResidueParams<LIMBS> {
+        return self.0.clone();
+    }
+
+    /// Clone the inner big integer
+    pub fn to_uint(&self) -> BigInt {
+        return self.0.modulus().clone();
+    }
+
+    pub fn new(modulus: DynResidueParams<LIMBS>) -> Self {
+        return Self(modulus);
+    }
+}
+
+/// An opaque residue is an element of the multiplicative group Z/n with no further information
+/// such as the decomposition. Ciphertexts are opaque residues
+pub struct OpaqueResidue(DynResidue<LIMBS>);
+
+/// A residue class is an element of the integer ring Z/r
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub struct ResidueClass(DynResidue<LIMBS>);
 
 /// A clear residue contains the value and its decomposition into the residue class and witness
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -52,26 +89,22 @@ impl ClearResidue {
     /// log algorithm to find the value of the residue class. Finally, onec the residue class is
     /// found, we can recover the witness.
     pub fn decompose(val: DynResidue<LIMBS>, keypair: &KeyPair) -> Self {
-        let phi_over_r = keypair
-            .get_sk()
-            .get_phi()
-            .checked_div(keypair.get_pk().get_r())
-            .unwrap();
+        let phi_over_r = keypair.phi_over_r();
         let y_to_phi_over_r = keypair.get_pk().get_y().pow(&phi_over_r).retrieve();
         let val_to_phi_over_r = val.pow(&phi_over_r).retrieve();
         let rc = discrete_log(
             &y_to_phi_over_r,
             &val_to_phi_over_r,
-            keypair.get_pk().get_r(),
+            keypair.get_pk().get_r().modulus(),
             keypair.get_pk().get_n(),
         )
         .unwrap();
-        let rc = DynResidue::new(&rc, DynResidueParams::new(keypair.get_pk().get_r()));
+        let rc = DynResidue::new(&rc, keypair.get_pk().get_r().to_dyn_residue_params());
         let witness = keypair.get_pk().invert_y().unwrap().pow(&rc.retrieve());
         let witness = val.mul(&witness);
         let witness = rth_root(
             witness,
-            keypair.get_pk().get_r(),
+            keypair.get_pk().get_r().modulus(),
             keypair.get_sk().get_phi(),
         )
         .unwrap();
@@ -86,7 +119,7 @@ impl ClearResidue {
         ambience: &PublicKey,
     ) -> Self {
         let z = witness // z is (x ** r)
-            .pow(ambience.get_r());
+            .pow(ambience.get_r().modulus());
         let val = ambience.get_y().pow(&rc.retrieve()).mul(&z);
         return Self::new(val, rc, witness, ambience);
     }
@@ -113,7 +146,7 @@ impl ClearResidue {
 
     /// Generate a random member of Z_n, including its decomposition
     pub fn random(class: Option<DynResidue<LIMBS>>, ambience: &PublicKey) -> Self {
-        let r = DynResidueParams::new(ambience.get_r());
+        let r = ambience.get_r().to_dyn_residue_params();
         let c = match class {
             Some(class) => class,
             None => DynResidue::new(&BigInt::random(&mut OsRng), r),
@@ -196,14 +229,18 @@ mod tests {
             DynResidueParams::new(keypair.get_pk().get_n()),
         );
         // 1 is always an r-th residue
-        let root = rth_root(one, keypair.get_pk().get_r(), keypair.get_sk().get_phi());
+        let root = rth_root(
+            one,
+            keypair.get_pk().get_r().modulus(),
+            keypair.get_sk().get_phi(),
+        );
         assert!(root.is_some());
 
         // y^e for 1 <= e < r is never an r-th residue
         for _ in 1..100 {
             let e = BigInt::random_mod(
                 &mut OsRng,
-                &NonZero::new(*keypair.get_pk().get_r()).unwrap(),
+                &NonZero::new(keypair.get_pk().get_r().modulus().clone()).unwrap(),
             );
             if e == BigInt::ZERO {
                 continue;
@@ -211,7 +248,7 @@ mod tests {
             let nonresidue = keypair.get_pk().get_y().pow(&e);
             let nonroot = rth_root(
                 nonresidue,
-                keypair.get_pk().get_r(),
+                keypair.get_pk().get_r().modulus(),
                 keypair.get_sk().get_phi(),
             );
             assert!(nonroot.is_none());

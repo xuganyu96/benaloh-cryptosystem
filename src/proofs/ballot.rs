@@ -143,7 +143,7 @@ impl Proof {
     ) -> bool {
         let reconstructed_commit = statement
             .get_val()
-            .mul(&response.pow(statement.get_ambience().get_r()));
+            .mul(&response.pow(statement.get_ambience().get_r().modulus()));
 
         return commitment.get_content().iter().any(|elem| {
             return elem.get_val() == &reconstructed_commit;
