@@ -45,7 +45,7 @@ pub struct Proof;
 impl Proof {
     pub fn respond(challenge: &Challenge, keypair: &KeyPair) -> BigInt {
         let challenge = challenge.get_challenge().get_val();
-        let decomp = ClearResidue::decompose(challenge.clone(), &keypair);
+        let decomp = ClearResidue::decompose(challenge.get_residue().clone(), &keypair);
         return decomp.get_rc().retrieve();
     }
 }

@@ -1,6 +1,7 @@
 //! A sample election procedure
 
-use benaloh_cryptosystem::{arithmetics::ClearResidue, keys::KeyPair, proofs, BigInt, LIMBS};
+use benaloh_cryptosystem::arithmetics::OpaqueResidue;
+use benaloh_cryptosystem::{arithmetics::ClearResidue, keys::KeyPair, proofs, BigInt};
 use crypto_bigint::modular::runtime_mod::{DynResidue, DynResidueParams};
 use crypto_bigint::rand_core::OsRng;
 use crypto_bigint::{NonZero, RandomMod};
@@ -38,7 +39,7 @@ fn main() {
     // Generate the ballots, and for each time,
     let n = DynResidueParams::new(keypair.get_pk().get_n());
     let r = keypair.get_pk().get_r().to_dyn_residue_params();
-    let mut ballots: Vec<DynResidue<LIMBS>> = vec![];
+    let mut ballots: Vec<OpaqueResidue> = vec![];
     let mut true_tally = DynResidue::new(&BigInt::ZERO, r);
     let valid_residue_classes = vec![
         DynResidue::new(&BigInt::ZERO, n),
@@ -63,7 +64,7 @@ fn main() {
         }
 
         // Keep track of the true ballots later for verification
-        ballots.push(ballot.get_val().clone());
+        ballots.push(ballot.clone_val());
         true_tally = true_tally.add(&vote);
     }
 

@@ -12,7 +12,10 @@
 //! the prover needs to reveal the individual decomposition of the capsule; for capsules not
 //! selected in the subset, an appropriate element within the capsule is selected to demonstrate
 //! the residue class of the ciphertext
-use crate::{arithmetics::ClearResidue, LIMBS};
+use crate::{
+    arithmetics::{ClearResidue, OpaqueResidue},
+    LIMBS,
+};
 use crypto_bigint::{modular::runtime_mod::DynResidue, Encoding};
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom;
@@ -144,6 +147,7 @@ impl Proof {
         let reconstructed_commit = statement
             .get_val()
             .mul(&response.pow(statement.get_ambience().get_r().modulus()));
+        let reconstructed_commit = OpaqueResidue::new(reconstructed_commit);
 
         return commitment.get_content().iter().any(|elem| {
             return elem.get_val() == &reconstructed_commit;

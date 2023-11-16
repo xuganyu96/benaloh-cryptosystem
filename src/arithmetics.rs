@@ -86,26 +86,59 @@ impl GroupModulus {
     }
 }
 
-/// An opaque residue is an element of the multiplicative group Z/n with no further information
-/// such as the decomposition. Ciphertexts are opaque residues
-pub struct OpaqueResidue(DynResidue<LIMBS>);
-
 /// A residue class is an element of the integer ring Z/r
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct ResidueClass(DynResidue<LIMBS>);
+
+impl Deref for ResidueClass {
+    type Target = DynResidue<LIMBS>;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl ResidueClass {
+    pub fn new(class: DynResidue<LIMBS>) -> Self {
+        return Self(class);
+    }
+}
+
+/// An opaque residue is an element of the multiplicative group Z/n with no further information
+/// such as the decomposition. Ciphertexts are opaque residues
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub struct OpaqueResidue(DynResidue<LIMBS>);
+
+impl Deref for OpaqueResidue {
+    type Target = DynResidue<LIMBS>;
+
+    fn deref(&self) -> &Self::Target {
+        return &self.0;
+    }
+}
+
+impl OpaqueResidue {
+    pub fn new(residue: DynResidue<LIMBS>) -> Self {
+        return Self(residue);
+    }
+
+    pub fn get_residue(&self) -> &DynResidue<LIMBS> {
+        return &self.0;
+    }
+}
 
 /// A clear residue contains the value and its decomposition into the residue class and witness
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ClearResidue {
     /// The value itself, as an invertible number (mod n)
-    val: DynResidue<LIMBS>,
+    val: OpaqueResidue,
 
     /// The residue class that this value belongs to, unique up to (mod r)
-    rc: DynResidue<LIMBS>,
+    rc: ResidueClass,
 
     /// The r-th root of val * (y ** -rc); the "x" in w = (y ** c) * (x ** r).
     /// An invertible integer under (mod n)
-    witness: DynResidue<LIMBS>,
+    witness: OpaqueResidue,
 
     /// A copy of the ambient primes (r, n, y)
     /// TODO: convert this into a reference to reduce copying
@@ -114,9 +147,9 @@ pub struct ClearResidue {
 
 impl ClearResidue {
     pub fn new(
-        val: DynResidue<LIMBS>,
-        rc: DynResidue<LIMBS>,
-        witness: DynResidue<LIMBS>,
+        val: OpaqueResidue,
+        rc: ResidueClass,
+        witness: OpaqueResidue,
         ambience: &PublicKey,
     ) -> Self {
         let ambience = ambience.clone();
@@ -147,7 +180,10 @@ impl ClearResidue {
             keypair.get_pk().get_n(),
         )
         .unwrap();
-        let rc = DynResidue::new(&rc, keypair.get_pk().get_r().to_dyn_residue_params());
+        let rc = ResidueClass::new(DynResidue::new(
+            &rc,
+            keypair.get_pk().get_r().to_dyn_residue_params(),
+        ));
         let witness = keypair.get_pk().invert_y().unwrap().pow(&rc.retrieve());
         let witness = val.mul(&witness);
         let witness = rth_root(
@@ -156,8 +192,9 @@ impl ClearResidue {
             keypair.get_sk().get_phi(),
         )
         .unwrap();
+        let witness = OpaqueResidue::new(witness);
 
-        return Self::new(val, rc, witness, keypair.get_pk());
+        return Self::new(OpaqueResidue::new(val), rc, witness, keypair.get_pk());
     }
 
     /// Construct a higher residue from its decomposition
@@ -168,22 +205,29 @@ impl ClearResidue {
     ) -> Self {
         let z = witness // z is (x ** r)
             .pow(ambience.get_r().modulus());
-        let val = ambience.get_y().pow(&rc.retrieve()).mul(&z);
+        let val = OpaqueResidue::new(ambience.get_y().pow(&rc.retrieve()).mul(&z));
+        let rc = ResidueClass::new(rc);
+        let witness = OpaqueResidue::new(witness);
         return Self::new(val, rc, witness, ambience);
     }
 
     /// Return a reference to the element itself
-    pub fn get_val(&self) -> &DynResidue<LIMBS> {
+    pub fn get_val(&self) -> &OpaqueResidue {
         return &self.val;
     }
 
+    /// Clone the opaque value
+    pub fn clone_val(&self) -> OpaqueResidue {
+        return self.val.clone();
+    }
+
     /// Return a reference to the residue class
-    pub fn get_rc(&self) -> &DynResidue<LIMBS> {
+    pub fn get_rc(&self) -> &ResidueClass {
         return &self.rc;
     }
 
     /// Return a reference to the witness
-    pub fn get_witness(&self) -> &DynResidue<LIMBS> {
+    pub fn get_witness(&self) -> &OpaqueResidue {
         return &self.witness;
     }
 
