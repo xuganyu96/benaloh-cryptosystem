@@ -102,6 +102,8 @@ pub struct VoterProof {
     statement: OpaqueResidue,
 
     /// The opaque residue that is used as the commitment
+    /// TODO: convert to Vec<OpaqueResidue> to allow a commitment that contains multiple values for
+    /// better confidence
     commitment: OpaqueResidue,
 
     challenge: ResidueClass,
@@ -169,9 +171,9 @@ impl VoterProof {
 
 /// The government's proof of being able to identify the residue class
 pub struct GovernmentProof {
-    statement: PublicKey,
-    challenge: OpaqueChallenge,
-    response: Option<Vec<ClearResidue>>,
+    pub statement: PublicKey,
+    pub challenge: OpaqueChallenge,
+    pub response: Option<Vec<ClearResidue>>,
 }
 
 impl GovernmentProof {

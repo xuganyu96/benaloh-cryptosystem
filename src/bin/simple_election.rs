@@ -14,9 +14,6 @@ const PARAMS_CHALLENGE_ROUNDS: usize = 10;
 const VOTERS: usize = 10;
 const BALLOT_VALIDITY_CONFIDENCE_BITS: usize = 256;
 
-/// Challenge the consonance of the parameters
-fn challenge_params(rounds: usize, keypair: &KeyPair) {}
-
 fn main() {
     let keypair = KeyPair::keygen(RING_BITS, MODULUS_BITS, SAFE);
 

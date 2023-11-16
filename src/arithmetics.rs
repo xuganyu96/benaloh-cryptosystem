@@ -8,7 +8,7 @@ use crypto_bigint::{
     rand_core::OsRng,
     CheckedAdd, Random,
 };
-use std::ops::{Add, Deref, Mul};
+use std::ops::{Add, Deref, Mul, Neg};
 
 /// A ring modulus defines the integer ring (mod r). Integer addition and multiplication are
 /// defined. Not all integers are invertible. Ring modulus is usually used as exponents,
@@ -91,8 +91,16 @@ impl GroupModulus {
 }
 
 /// A residue class is an element of the integer ring Z/r
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct ResidueClass(DynResidue<LIMBS>);
+
+impl PartialEq for ResidueClass {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.retrieve() == other.0.retrieve()
+    }
+}
+
+impl Eq for ResidueClass {}
 
 impl Deref for ResidueClass {
     type Target = DynResidue<LIMBS>;
@@ -102,15 +110,39 @@ impl Deref for ResidueClass {
     }
 }
 
+impl Neg for ResidueClass {
+    type Output = ResidueClass;
+
+    fn neg(self) -> Self::Output {
+        return Self::new(-self.0);
+    }
+}
+
 impl ResidueClass {
     pub fn new(class: DynResidue<LIMBS>) -> Self {
         return Self(class);
+    }
+
+    pub fn zero(params: DynResidueParams<LIMBS>) -> Self {
+        return Self::new(DynResidue::new(&BigInt::ZERO, params));
+    }
+
+    pub fn one(params: DynResidueParams<LIMBS>) -> Self {
+        return Self::new(DynResidue::new(&BigInt::ONE, params));
     }
 
     pub fn from_be_bytes(bytes: &[u8], modulus: &RingModulus) -> Self {
         let val = BigInt::from_be_slice(bytes);
         let residue = DynResidue::new(&val, modulus.to_dyn_residue_params());
         return Self::new(residue);
+    }
+
+    pub fn get_residue(&self) -> &DynResidue<LIMBS> {
+        return &self.0;
+    }
+
+    pub fn clone_residue(&self) -> DynResidue<LIMBS> {
+        return self.0.clone();
     }
 }
 
