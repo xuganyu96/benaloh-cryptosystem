@@ -8,7 +8,7 @@ use crypto_bigint::{
     rand_core::OsRng,
     CheckedAdd, Random,
 };
-use std::ops::Deref;
+use std::ops::{Add, Deref, Mul};
 
 /// A ring modulus defines the integer ring (mod r). Integer addition and multiplication are
 /// defined. Not all integers are invertible. Ring modulus is usually used as exponents,
@@ -84,6 +84,10 @@ impl GroupModulus {
     pub fn new(modulus: DynResidueParams<LIMBS>) -> Self {
         return Self(modulus);
     }
+
+    pub fn from_uint(modulus: &BigInt) -> Self {
+        return Self(DynResidueParams::new(modulus));
+    }
 }
 
 /// A residue class is an element of the integer ring Z/r
@@ -102,6 +106,29 @@ impl ResidueClass {
     pub fn new(class: DynResidue<LIMBS>) -> Self {
         return Self(class);
     }
+
+    pub fn from_be_bytes(bytes: &[u8], modulus: &RingModulus) -> Self {
+        let val = BigInt::from_be_slice(bytes);
+        let residue = DynResidue::new(&val, modulus.to_dyn_residue_params());
+        return Self::new(residue);
+    }
+}
+
+impl Mul<ResidueClass> for ResidueClass {
+    type Output = ResidueClass;
+
+    fn mul(self, rhs: ResidueClass) -> Self::Output {
+        let product = self.0.mul(rhs.0);
+        return Self::new(product);
+    }
+}
+
+impl Add<ResidueClass> for ResidueClass {
+    type Output = ResidueClass;
+
+    fn add(self, rhs: ResidueClass) -> Self::Output {
+        return Self::new(self.0.add(rhs.0));
+    }
 }
 
 /// An opaque residue is an element of the multiplicative group Z/n with no further information
@@ -117,6 +144,14 @@ impl Deref for OpaqueResidue {
     }
 }
 
+impl Mul<OpaqueResidue> for OpaqueResidue {
+    type Output = OpaqueResidue;
+
+    fn mul(self, rhs: OpaqueResidue) -> Self::Output {
+        return OpaqueResidue::new(self.0.mul(rhs.0));
+    }
+}
+
 impl OpaqueResidue {
     pub fn new(residue: DynResidue<LIMBS>) -> Self {
         return Self(residue);
@@ -124,6 +159,20 @@ impl OpaqueResidue {
 
     pub fn get_residue(&self) -> &DynResidue<LIMBS> {
         return &self.0;
+    }
+
+    pub fn clone_residue(&self) -> DynResidue<LIMBS> {
+        return self.0.clone();
+    }
+
+    pub fn pow(&self, exponent: &ResidueClass) -> Self {
+        return Self::new(self.0.pow(&exponent.retrieve()));
+    }
+
+    /// A wrapper around DynResidue::invert. Will exhibit undefined behavior if not invertible
+    pub fn invert(&self) -> Self {
+        let (inverse, _) = self.0.invert();
+        return Self::new(inverse);
     }
 }
 
@@ -145,6 +194,18 @@ pub struct ClearResidue {
     ambience: PublicKey,
 }
 
+impl Mul<ClearResidue> for ClearResidue {
+    type Output = ClearResidue;
+
+    fn mul(self, rhs: ClearResidue) -> Self::Output {
+        let val = self.clone_val() * rhs.clone_val();
+        let rc = self.clone_rc() + rhs.clone_rc();
+        let witness = self.clone_witness() * rhs.clone_witness();
+
+        return Self::new(val, rc, witness, self.get_ambience());
+    }
+}
+
 impl ClearResidue {
     pub fn new(
         val: OpaqueResidue,
@@ -159,6 +220,10 @@ impl ClearResidue {
             witness,
             ambience,
         };
+    }
+
+    pub fn is_exact_residue(&self) -> bool {
+        return self.get_rc().retrieve() == BigInt::ZERO;
     }
 
     /// Decompose an opaque value into its residual representation (c, x)
@@ -177,17 +242,17 @@ impl ClearResidue {
             &y_to_phi_over_r,
             &val_to_phi_over_r,
             keypair.get_pk().get_r().modulus(),
-            keypair.get_pk().get_n(),
+            keypair.get_pk().get_n().modulus(),
         )
         .unwrap();
         let rc = ResidueClass::new(DynResidue::new(
             &rc,
             keypair.get_pk().get_r().to_dyn_residue_params(),
         ));
-        let witness = keypair.get_pk().invert_y().unwrap().pow(&rc.retrieve());
-        let witness = val.mul(&witness);
+        let witness = keypair.get_pk().invert_y().pow(&rc);
+        let witness = OpaqueResidue::new(val).mul(witness);
         let witness = rth_root(
-            witness,
+            witness.clone_residue(),
             keypair.get_pk().get_r().modulus(),
             keypair.get_sk().get_phi(),
         )
@@ -211,6 +276,15 @@ impl ClearResidue {
         return Self::new(val, rc, witness, ambience);
     }
 
+    /// Raise a residue to the power of the residue class
+    pub fn pow(&self, exponent: &ResidueClass) -> Self {
+        let val = self.get_val().pow(exponent);
+        let witness = self.get_witness().pow(exponent);
+        let rc = self.clone_rc() * exponent.clone();
+
+        return Self::new(val, rc, witness, self.get_ambience());
+    }
+
     /// Return a reference to the element itself
     pub fn get_val(&self) -> &OpaqueResidue {
         return &self.val;
@@ -226,9 +300,19 @@ impl ClearResidue {
         return &self.rc;
     }
 
+    /// Return a copy to the residue class
+    pub fn clone_rc(&self) -> ResidueClass {
+        return self.rc.clone();
+    }
+
     /// Return a reference to the witness
     pub fn get_witness(&self) -> &OpaqueResidue {
         return &self.witness;
+    }
+
+    /// Clone the witness
+    pub fn clone_witness(&self) -> OpaqueResidue {
+        return self.witness.clone();
     }
 
     /// Return a reference to the ambience public key
@@ -317,7 +401,7 @@ mod tests {
         let keypair = KeyPair::keygen(RINGSIZE, MODSIZE, SAFEPRIME);
         let one = DynResidue::new(
             &BigInt::ONE,
-            DynResidueParams::new(keypair.get_pk().get_n()),
+            keypair.get_pk().get_n().to_dyn_residue_params(),
         );
         // 1 is always an r-th residue
         let root = rth_root(

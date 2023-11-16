@@ -214,7 +214,7 @@ impl Capsule {
     /// x^{-1}x', where x is the witness of the statement, and x' is the witness of the matching
     /// element in the capsule
     pub fn decompose(&self, statement: &ClearResidue) -> Response {
-        let (x_inv, _) = statement.get_witness().invert();
+        let x_inv = statement.get_witness().invert();
 
         for elem in self.get_content() {
             if elem.get_rc().retrieve() == statement.get_rc().retrieve() {
@@ -239,12 +239,11 @@ pub enum Response {
 mod tests {
     use super::*;
     use crate::{keys::KeyPair, BigInt};
-    use crypto_bigint::modular::runtime_mod::DynResidueParams;
 
     #[test]
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
-        let n = DynResidueParams::new(keypair.get_pk().get_n());
+        let n = keypair.get_pk().get_n().to_dyn_residue_params();
         let zero = DynResidue::new(&BigInt::ZERO, n);
         let one = DynResidue::new(&BigInt::ONE, n);
         let statement = ClearResidue::random(Some(one), keypair.get_pk());

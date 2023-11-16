@@ -13,7 +13,7 @@
 use crypto_bigint::modular::runtime_mod::DynResidue;
 
 use crate::{
-    arithmetics::{rth_root, ClearResidue},
+    arithmetics::{rth_root, ClearResidue, ResidueClass},
     keys::KeyPair,
     LIMBS,
 };
@@ -92,13 +92,13 @@ impl Challenge {
     /// The response is valid for the proof if and only if:
     /// (statement) * (commit) / (y ** response) is an r-th residue
     pub fn verify(&self, proof: &Proof, response: &DynResidue<LIMBS>) -> bool {
-        let y_inv = &self.keypair.get_pk().invert_y().unwrap();
+        let y_inv = &self.keypair.get_pk().invert_y();
         let statement = proof.get_statement().get_val();
         let commit = proof.get_commit().get_val();
         let witness = statement
-            .pow(&self.get_challenge().retrieve())
+            .pow(&ResidueClass::new(self.get_challenge().clone()))
             .mul(&commit)
-            .mul(&y_inv.pow(&response.retrieve()));
+            .mul(&y_inv.pow(&ResidueClass::new(response.clone())));
         return rth_root(
             witness,
             self.keypair.get_pk().get_r().modulus(),

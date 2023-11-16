@@ -1,6 +1,6 @@
 //! The key pairs
 use crate::{
-    arithmetics::{self, RingModulus},
+    arithmetics::{self, GroupModulus, OpaqueResidue, RingModulus},
     BigInt, LIMBS,
 };
 use crypto_bigint::{
@@ -18,16 +18,18 @@ use crypto_bigint::{
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct PublicKey {
     r: RingModulus,
-    n: BigInt,
+
+    n: GroupModulus,
 
     /// y is an element of the multiplicative group Z/n, but with the type DynResidue instead of a
     /// naked BigInt
-    y: DynResidue<LIMBS>,
+    /// TODO: replace this with OpaqueResidue
+    y: OpaqueResidue,
 }
 
 impl PublicKey {
     /// Instantiate an instance with no check
-    pub fn new(r: RingModulus, n: BigInt, y: DynResidue<LIMBS>) -> Self {
+    pub fn new(r: RingModulus, n: GroupModulus, y: OpaqueResidue) -> Self {
         return Self { r, n, y };
     }
 
@@ -35,7 +37,7 @@ impl PublicKey {
         &self.r
     }
 
-    pub fn get_n(&self) -> &BigInt {
+    pub fn get_n(&self) -> &GroupModulus {
         &self.n
     }
 
@@ -43,21 +45,15 @@ impl PublicKey {
         &self.y
     }
 
-    /// Return the multiplicative inverse of y
-    /// It should always be the case that y is invertible, but the uninvertible case is still
-    /// accounted for as idiomatic Rust
-    pub fn invert_y(&self) -> Option<DynResidue<LIMBS>> {
-        let (y_inv, invertible) = self.y.invert();
-        if invertible.into() {
-            return Some(y_inv);
-        }
-        return None;
+    /// Return the multiplicative inverse of y. This inverse should always exist y is sampled from
+    /// the multiplicative group
+    pub fn invert_y(&self) -> OpaqueResidue {
+        return self.y.invert();
     }
 
     /// Sample a random element from the multiplicative group Z/n
     pub fn sample_invertible(&self) -> DynResidue<LIMBS> {
-        let n = DynResidueParams::new(self.get_n());
-        return arithmetics::sample_invertible(n);
+        return arithmetics::sample_invertible(self.get_n().to_dyn_residue_params());
     }
 }
 
@@ -162,14 +158,14 @@ impl KeyPair {
 
     /// Sample a non-residue. A non-residue is an invertible element such that
     /// y^{phi/r} != 1 (mod n)
-    fn sample_nonresidue(modulus: &BigInt, r: &BigInt, phi: &BigInt) -> DynResidue<LIMBS> {
+    fn sample_nonresidue(modulus: &GroupModulus, r: &BigInt, phi: &BigInt) -> OpaqueResidue {
         let quotient = phi.checked_div(r).unwrap();
-        let modulus = DynResidueParams::new(modulus);
+        let modulus = modulus.to_dyn_residue_params();
 
         loop {
             let y = arithmetics::sample_invertible(modulus);
             if y.pow(&quotient).retrieve() != BigInt::ONE {
-                return y;
+                return OpaqueResidue::new(y);
             }
         }
     }
@@ -216,7 +212,7 @@ impl KeyPair {
         let p = Self::generate_p(r.modulus(), xbound, b, safe);
 
         // Compute n and phi
-        let n = p.checked_mul(&q).unwrap();
+        let n = GroupModulus::from_uint(&p.checked_mul(&q).unwrap());
         let phi = p
             .checked_sub(&BigInt::ONE)
             .unwrap()

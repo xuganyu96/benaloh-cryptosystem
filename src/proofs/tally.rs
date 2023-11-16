@@ -11,7 +11,7 @@
 //! the commitment, so the entire proof can be performed offline
 
 use crate::{
-    arithmetics::{self, ClearResidue},
+    arithmetics::{self, ClearResidue, ResidueClass},
     keys::PublicKey,
     BigInt, LIMBS,
 };
@@ -66,7 +66,7 @@ impl Proof {
     ) -> DynResidue<LIMBS> {
         return statement
             .get_witness()
-            .pow(&challenge.retrieve())
+            .pow(&ResidueClass::new(challenge.clone()))
             .mul(commitment.get_witness());
     }
 
@@ -80,7 +80,7 @@ impl Proof {
         let lhs = response.pow(ambience.get_r().modulus());
         let rhs = statement
             .get_val()
-            .pow(&challenge.retrieve())
+            .pow(&ResidueClass::new(challenge.clone()))
             .mul(commitment.get_val());
 
         return lhs.retrieve() == rhs.retrieve();
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
-        let n = DynResidueParams::new(keypair.get_pk().get_n());
+        let n = keypair.get_pk().get_n().to_dyn_residue_params();
         let zero = DynResidue::new(
             &BigInt::ZERO,
             keypair.get_pk().get_r().to_dyn_residue_params(),

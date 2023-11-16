@@ -2,7 +2,7 @@
 
 use benaloh_cryptosystem::arithmetics::OpaqueResidue;
 use benaloh_cryptosystem::{arithmetics::ClearResidue, keys::KeyPair, proofs, BigInt};
-use crypto_bigint::modular::runtime_mod::{DynResidue, DynResidueParams};
+use crypto_bigint::modular::runtime_mod::DynResidue;
 use crypto_bigint::rand_core::OsRng;
 use crypto_bigint::{NonZero, RandomMod};
 
@@ -13,6 +13,9 @@ const SAFE: bool = false;
 const PARAMS_CHALLENGE_ROUNDS: usize = 10;
 const VOTERS: usize = 10;
 const BALLOT_VALIDITY_CONFIDENCE_BITS: usize = 256;
+
+/// Challenge the consonance of the parameters
+fn challenge_params(rounds: usize, keypair: &KeyPair) {}
 
 fn main() {
     let keypair = KeyPair::keygen(RING_BITS, MODULUS_BITS, SAFE);
@@ -37,7 +40,7 @@ fn main() {
     }
 
     // Generate the ballots, and for each time,
-    let n = DynResidueParams::new(keypair.get_pk().get_n());
+    let n = keypair.get_pk().get_n().to_dyn_residue_params();
     let r = keypair.get_pk().get_r().to_dyn_residue_params();
     let mut ballots: Vec<OpaqueResidue> = vec![];
     let mut true_tally = DynResidue::new(&BigInt::ZERO, r);
@@ -79,13 +82,7 @@ fn main() {
     }
     // Prove that (product * (y ** -tally)) is an r-th residue
     let statement = ClearResidue::decompose(
-        product.mul(
-            &keypair
-                .get_pk()
-                .invert_y()
-                .unwrap()
-                .pow(&decryption.get_rc().retrieve()),
-        ),
+        product.mul(&keypair.get_pk().invert_y().pow(decryption.get_rc())),
         &keypair,
     );
     let commitment = proofs::tally::Proof::generate_commitment(n, keypair.get_pk());
