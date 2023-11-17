@@ -1,100 +1,112 @@
 //! A sample election procedure
 
-use benaloh_cryptosystem::arithmetics::OpaqueResidue;
-use benaloh_cryptosystem::{arithmetics::ClearResidue, keys::KeyPair, proofs, BigInt};
+use benaloh_cryptosystem::{
+    arithmetics::{ClearResidue, OpaqueResidue},
+    keys::KeyPair,
+    proofs, BigInt, GROUPSIZE, LIMBS, RINGSIZE,
+};
 use crypto_bigint::modular::runtime_mod::DynResidue;
 use crypto_bigint::rand_core::OsRng;
 use crypto_bigint::{NonZero, RandomMod};
 
-const RING_BITS: usize = 16;
-const MODULUS_BITS: usize = 64;
-const SAFE: bool = false;
-
 const PARAMS_CHALLENGE_ROUNDS: usize = 10;
-const VOTERS: usize = 10;
-const BALLOT_VALIDITY_CONFIDENCE_BITS: usize = 256;
+const VOTERS: usize = 1000;
 
-fn main() {
-    let keypair = KeyPair::keygen(RING_BITS, MODULUS_BITS, SAFE);
+/// Generate the keypair
+fn keygen(ring_size: usize, group_size: usize, safe_prime: bool) -> KeyPair {
+    let keypair = KeyPair::keygen(ring_size, group_size, safe_prime);
+    println!("Keypair generated");
 
-    // challenge the validity of the parameters (r, n, y)
-    for _ in 0..PARAMS_CHALLENGE_ROUNDS {
-        // Voter generates some challenge ciphertext then proves that the residue class is known
-        let voter_statement = ClearResidue::random(None, keypair.get_pk());
-        let voter_proof = proofs::rc::Proof::from_statement(voter_statement.clone());
-        let voter_challenge = proofs::rc::Challenge::generate(&keypair);
-        let voter_response = voter_proof.respond(&voter_challenge);
-        if !voter_challenge.verify(&voter_proof, &voter_response) {
-            panic!("Voter failed to prove knowledge of residue class");
-        }
+    return keypair;
+}
 
-        // Government demonstrates correct identification of residue class
-        let gov_challenge = proofs::decide::Challenge::new(voter_statement);
-        let gov_response = proofs::decide::Proof::respond(&gov_challenge, &keypair);
-        if !gov_challenge.verify(&gov_response) {
-            panic!("Government failed to identify residue class of");
-        }
+/// challenge the validity of the parameters (r, n, y)
+/// For each of the challenge round, a challenge ciphertext (including the voter's proof) is
+/// randomly generated. The government then uses the secret key to decrypt the challenge and
+/// produces the residue class
+fn challenge_consonance(rounds: usize, keypair: &KeyPair) {
+    for round in 0..rounds {
+        print!("Consonance challenge round {round}/{rounds}...  ");
+        let challenge = proofs::consonance::ClearChallenge::generate(keypair.get_pk(), 1);
+        let opaque = challenge.obscure();
+        let gov_proof = proofs::consonance::GovernmentProof::respond(&opaque, &keypair);
+        challenge.verify_gov_proof(&gov_proof);
+        println!("Challenge successful!");
     }
+}
 
-    // Generate the ballots, and for each time,
-    let n = keypair.get_pk().get_n().to_dyn_residue_params();
+/// Generate the ballots. Each ballot is a random encryption of 0 or 1.
+/// At each ballot, a proof of ballot's validity is generated and verified.
+/// The true ballot count is also kept for verification purpose.
+fn generate_ballots(keypair: &KeyPair, count: usize) -> (Vec<OpaqueResidue>, DynResidue<LIMBS>) {
     let r = keypair.get_pk().get_r().to_dyn_residue_params();
-    let mut ballots: Vec<OpaqueResidue> = vec![];
+    let mut ballots: Vec<OpaqueResidue> = vec![]; // the set of ballots
+                                                  // The true tally count, used to verify that the decryption is correct later
     let mut true_tally = DynResidue::new(&BigInt::ZERO, r);
-    let valid_residue_classes = vec![
-        DynResidue::new(&BigInt::ZERO, n),
-        DynResidue::new(&BigInt::ONE, n),
-    ];
-    for _ in 0..VOTERS {
+    println!("Generating {count} ballots");
+    for i in 0..count {
         let two = NonZero::new(BigInt::from_u8(2)).unwrap();
-        let vote = DynResidue::new(&BigInt::random_mod(&mut OsRng, &two), r);
+        let vote = DynResidue::new(
+            &BigInt::random_mod(&mut OsRng, &two),
+            keypair.get_pk().get_r().to_dyn_residue_params(),
+        );
         let ballot = ClearResidue::random(Some(vote), keypair.get_pk());
 
-        // Prove that the ballot is indeed either 0 or 1
-        let commitment = proofs::ballot::Proof::generate_commitment(
+        let proof = proofs::ballot::BallotProof::from_statement(
             &ballot,
-            &valid_residue_classes,
-            BALLOT_VALIDITY_CONFIDENCE_BITS,
+            &proofs::ballot::zero_or_one(&keypair.get_pk().get_r()),
+            keypair.get_pk(),
         );
-        let challenge = proofs::ballot::Proof::generate_challenge(&commitment);
-        let response = proofs::ballot::Proof::respond(&ballot, &commitment, &challenge);
-        let validated = proofs::ballot::Proof::verify(&ballot, &commitment, &response);
-        if !validated {
+        if !proof.verify() {
             panic!("Ballot's residue class cannot be validated");
         }
 
-        // Keep track of the true ballots later for verification
+        if (i + 1) % (count / 10) == 0 {
+            println!("{}/{} ballots generated and verified", i + 1, count);
+        }
+
         ballots.push(ballot.clone_val());
         true_tally = true_tally.add(&vote);
     }
+    println!("{count} ballots generated and verified");
 
-    // Tally the ballots and release a proof
-    let mut product = DynResidue::new(&BigInt::ONE, n);
+    return (ballots, true_tally);
+}
+
+/// Collect the ballots and compute the final tally. After the finally tally is computed, a
+/// proof is released and verified.
+/// Finally, the collected tally is verified against the true tally
+fn tally(keypair: &KeyPair, ballots: &[OpaqueResidue], true_tally: &DynResidue<LIMBS>) {
+    let mut product = DynResidue::new(
+        &BigInt::ONE,
+        keypair.get_pk().get_n().to_dyn_residue_params(),
+    );
     for ballot in ballots {
         product = product.mul(&ballot);
     }
     let decryption = ClearResidue::decompose(product, &keypair);
-    if decryption.get_rc().retrieve() != true_tally.retrieve() {
-        panic!("the final tally is incorrect!");
-    }
-    // Prove that (product * (y ** -tally)) is an r-th residue
     let statement = ClearResidue::decompose(
         product.mul(&keypair.get_pk().invert_y().pow(decryption.get_rc())),
         &keypair,
     );
-    let commitment = proofs::tally::Proof::generate_commitment(n, keypair.get_pk());
-    let challenge =
-        proofs::tally::Proof::generate_challenge(&commitment, keypair.get_pk().get_r().modulus());
-    let response = proofs::tally::Proof::respond(&statement, &commitment, &challenge);
-    let validated = proofs::tally::Proof::verify(
-        &statement,
-        &commitment,
-        &challenge,
-        &response,
-        keypair.get_pk(),
-    );
-    if !validated {
+    let proof = proofs::tally::TallyProof::from_statement(statement, 1, keypair.get_pk());
+    if !proof.verify() {
         panic!("The residue class of the tally failed to be verified");
+    } else {
+        println!("decryption proof verified");
     }
+
+    if decryption.get_rc().retrieve() != true_tally.retrieve() {
+        panic!("the final tally is incorrect!");
+    } else {
+        println!("The final tally is correct");
+    }
+}
+
+fn main() {
+    let keypair = keygen(RINGSIZE, GROUPSIZE, false);
+    challenge_consonance(PARAMS_CHALLENGE_ROUNDS, &keypair);
+    let (ballots, true_tally) = generate_ballots(&keypair, VOTERS);
+    tally(&keypair, &ballots, &true_tally);
     println!("The election is a success!");
 }

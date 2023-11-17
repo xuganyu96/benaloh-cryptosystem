@@ -132,7 +132,9 @@ impl ResidueClass {
     }
 
     pub fn from_be_bytes(bytes: &[u8], modulus: &RingModulus) -> Self {
-        let val = BigInt::from_be_slice(bytes);
+        let mut padded = vec![0; BigInt::BYTES - bytes.len()];
+        padded.extend_from_slice(bytes);
+        let val = BigInt::from_be_slice(&padded);
         let residue = DynResidue::new(&val, modulus.to_dyn_residue_params());
         return Self::new(residue);
     }

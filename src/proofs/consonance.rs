@@ -53,6 +53,22 @@ impl ClearChallenge {
         return &self.answers;
     }
 
+    pub fn verify_gov_proof(&self, gov_proof: &GovernmentProof) -> bool {
+        match &gov_proof.response {
+            None => todo!("How to verify if proof fails?"),
+            Some(decryptions) => {
+                if decryptions.len() != self.answers.len() {
+                    return false;
+                } else {
+                    return decryptions
+                        .iter()
+                        .zip(self.answers.iter())
+                        .all(|(decrypt, answer)| decrypt.get_rc() == answer.get_rc());
+                }
+            }
+        };
+    }
+
     /// Convert the voter's copy of the challenge into the government's copy of the challenge.
     /// All data will be cloned (in practical context data will be transmitted across a network
     /// so cloning is inevitable anyways), although the answers will not be cloned.
@@ -205,32 +221,17 @@ impl GovernmentProof {
             .collect::<Vec<ClearResidue>>();
         return Self::new(keypair.get_pk().clone(), challenge.clone(), Some(answers));
     }
-
-    pub fn verify(&self, answers: &[ClearResidue]) -> bool {
-        match &self.response {
-            None => todo!("How to verify if proof fails?"),
-            Some(decryptions) => {
-                if decryptions.len() != answers.len() {
-                    return false;
-                } else {
-                    return decryptions
-                        .iter()
-                        .zip(answers.iter())
-                        .all(|(decrypt, answer)| decrypt.get_rc() == answer.get_rc());
-                }
-            }
-        };
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{GROUPSIZE, RINGSIZE};
 
     #[test]
     fn test_verify_proofs() {
-        let keypair = KeyPair::keygen(16, 64, false);
-        let voter_challenge = ClearChallenge::generate(keypair.get_pk(), 64);
+        let keypair = KeyPair::keygen(RINGSIZE, GROUPSIZE, false);
+        let voter_challenge = ClearChallenge::generate(keypair.get_pk(), 16);
         let opaque_challenge = voter_challenge.obscure();
         assert!(opaque_challenge.verify_proofs(&keypair));
     }
@@ -238,7 +239,7 @@ mod tests {
     /// An honest voter should be able to generate a verifiable VoterProof
     #[test]
     fn test_voter_proof_correctness() {
-        let keypair = KeyPair::keygen(16, 64, false);
+        let keypair = KeyPair::keygen(RINGSIZE, GROUPSIZE, false);
         let statement = ClearResidue::random(None, keypair.get_pk());
         let proof = VoterProof::from_statement(&statement, keypair.get_pk());
         assert!(proof.verify(&keypair));
@@ -247,10 +248,10 @@ mod tests {
     /// Test that a pair of honest voter and government can verify each other's proofs
     #[test]
     fn test_gov_proof_correctness() {
-        let keypair = KeyPair::keygen(16, 64, false);
+        let keypair = KeyPair::keygen(RINGSIZE, GROUPSIZE, false);
         let voter_challenge = ClearChallenge::generate(keypair.get_pk(), 16);
         let opaque_challenge = voter_challenge.obscure();
         let gov_proof = GovernmentProof::respond(&opaque_challenge, &keypair);
-        assert!(gov_proof.verify(voter_challenge.get_answers()));
+        assert!(voter_challenge.verify_gov_proof(&gov_proof));
     }
 }

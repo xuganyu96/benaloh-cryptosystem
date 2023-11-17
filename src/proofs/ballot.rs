@@ -13,81 +13,89 @@
 //! selected in the subset, an appropriate element within the capsule is selected to demonstrate
 //! the residue class of the ciphertext
 use crate::{
-    arithmetics::{ClearResidue, OpaqueResidue},
-    LIMBS,
+    arithmetics::{ClearResidue, OpaqueResidue, ResidueClass, RingModulus},
+    keys::PublicKey,
+    BigInt,
 };
-use crypto_bigint::{modular::runtime_mod::DynResidue, Encoding};
-use rand::rngs::OsRng;
+use crypto_bigint::{modular::runtime_mod::DynResidue, rand_core::OsRng, Encoding};
 use rand::seq::SliceRandom;
 use sha3::{Digest, Sha3_256};
 
-pub struct Proof {
-    statement: ClearResidue,
+/// The choice of using SHA-256 decides that the confidence level has to be 256
+/// In a more robust setting we should have dynamic confidence level
+pub const CONFIDENCE: usize = 256;
 
-    /// The commit is a list of capsules. There is no need to maintain a separate variable about
-    /// the confidence level because the length of the commitment is exactly that
-    commitment: Vec<Capsule>,
+/// Use this function to generate the 2-array of residue classes RC[0] and RC[1]
+pub fn zero_or_one(modulus: &RingModulus) -> [ResidueClass; 2] {
+    let one = ResidueClass::new(DynResidue::new(
+        &BigInt::ONE,
+        modulus.to_dyn_residue_params(),
+    ));
+    let zero = ResidueClass::new(DynResidue::new(
+        &BigInt::ZERO,
+        modulus.to_dyn_residue_params(),
+    ));
+    return [one, zero];
 }
 
-impl Proof {
-    pub fn new(statement: ClearResidue, commitment: Vec<Capsule>) -> Self {
+/// Proof that the ballot belongs to one of the pre-specified residue classes without revealing
+/// which specific class. In a simple election, we prove that the ballot belongs to either
+/// RC[0] or RC[1]
+pub struct BallotProof {
+    pub statement: OpaqueResidue,
+
+    pub commitment: Vec<OpaqueCapsule>,
+
+    pub challenge: Vec<bool>,
+
+    pub response: Vec<Response>,
+}
+
+impl BallotProof {
+    pub fn new(
+        statement: OpaqueResidue,
+        commitment: Vec<OpaqueCapsule>,
+        challenge: Vec<bool>,
+        response: Vec<Response>,
+    ) -> Self {
         return Self {
             statement,
             commitment,
+            challenge,
+            response,
         };
     }
 
-    pub fn get_statement(&self) -> &ClearResidue {
-        return &self.statement;
-    }
-
-    pub fn get_commitment(&self) -> &[Capsule] {
-        return &self.commitment;
-    }
-
-    /// Return the confidence in the proof (the probability that a dishonest prover fails to fool
-    /// an honest verifier), expresssed in the number of bits. The actual probability is
-    /// (1 - 2 ** bits)
-    pub fn get_confidence_bits(&self) -> usize {
-        return self.get_commitment().len();
-    }
-
-    /// Instantiate from a statement and generate the commitment, which is a vector of capsules.
-    /// Each capsule contains one element from each of the input classes. The number of capsules in
-    /// the commit is given by the confidence.
-    pub fn generate_commitment(
+    /// Produce a proof that the statement is in one of the specified residue classes
+    pub fn from_statement(
         statement: &ClearResidue,
-        classes: &[DynResidue<LIMBS>],
-        confidence: usize,
-    ) -> Vec<Capsule> {
-        let mut capsules = vec![];
+        classes: &[ResidueClass],
+        pk: &PublicKey,
+    ) -> Self {
+        let answers = (0..CONFIDENCE)
+            .map(|_| ClearCapsule::generate(classes, pk))
+            .collect::<Vec<ClearCapsule>>();
+        let commitment = answers
+            .iter()
+            .map(|clear| clear.obscure())
+            .collect::<Vec<OpaqueCapsule>>();
+        let challenge = Self::generate_challenge(&commitment);
+        let response = Self::respond(statement, &answers, &challenge, pk);
 
-        for _ in 0..confidence {
-            let mut capsule = Capsule::new();
-            for rc in classes {
-                let x = statement.get_ambience().sample_invertible();
-                let elem = ClearResidue::compose(rc.clone(), x, statement.get_ambience());
-                capsule.append(elem);
-            }
-            capsule.shuffle();
-            capsules.push(capsule);
-        }
-
-        return capsules;
+        return Self::new(statement.clone_val(), commitment, challenge, response);
     }
 
-    /// Hash the list of capsules into a single bit sequence
-    pub fn generate_challenge(commitment: &[Capsule]) -> Vec<bool> {
+    fn generate_challenge(commitment: &[OpaqueCapsule]) -> Vec<bool> {
         let mut hasher = Sha3_256::new();
+
         for capsule in commitment {
-            for residue in capsule.get_content() {
-                hasher.update(&residue.get_val().retrieve().to_be_bytes());
+            for residue in capsule.get_elements() {
+                hasher.update(residue.retrieve().to_be_bytes());
             }
         }
 
         let hash: Vec<u8> = hasher.finalize().to_vec();
         let mut challenge = vec![true; 256];
-
         for (i, byte) in hash.iter().enumerate() {
             for j in 0..u8::BITS {
                 let loc = i * 8 + j as usize;
@@ -103,156 +111,198 @@ impl Proof {
         return challenge;
     }
 
-    /// Iterate through the challenges and build response accordingly
-    pub fn respond(
+    fn respond(
         statement: &ClearResidue,
-        commitment: &[Capsule],
+        commitment: &[ClearCapsule],
         challenge: &[bool],
+        pk: &PublicKey,
     ) -> Vec<Response> {
         if challenge.len() != commitment.len() {
-            panic!("Challenge and commit not equal in length");
+            panic!("Challenge and commitment not equal in length");
         }
 
         let mut responses = vec![];
         for (i, open_capsule) in challenge.iter().enumerate() {
-            let capsule = commitment.get(i).unwrap();
             if *open_capsule {
-                responses.push(capsule.open());
+                let clear_capsule = commitment.get(i).unwrap().clone();
+                let response = Response::OpenCapsule(clear_capsule);
+                responses.push(response);
             } else {
-                responses.push(capsule.decompose(statement));
+                responses.push(Response::ConsumeCapsule(
+                    commitment.get(i).unwrap().consume(statement, pk),
+                ));
             }
         }
-
         return responses;
     }
 
-    /// Validate an opened capsule
-    pub fn validate_open_capsule(commitment: &Capsule, response: &[ClearResidue]) -> bool {
-        if commitment.get_content().len() != response.len() {
-            return false;
+    /// Verify a single response. If the response is "open capsule", then check that the
+    /// values of the opened capsule match exactly with the values of the commitment capsules.
+    /// if the response is "consume capsule", then use the response to reconstruct the element
+    /// from the capsule, and check that such an element indeed exists.
+    fn verify_response(
+        statement: &OpaqueResidue,
+        commitment: &OpaqueCapsule,
+        response: &Response,
+    ) -> bool {
+        match response {
+            Response::ConsumeCapsule(quotient) => {
+                let reconstructed = statement.clone() * quotient.clone_val();
+                let has_match = commitment
+                    .get_elements()
+                    .iter()
+                    .any(|elem| *elem == reconstructed);
+                if !has_match {
+                    panic!("Consume capsule failed to verify");
+                }
+                return has_match;
+            }
+            Response::OpenCapsule(open_cap) => {
+                if commitment.get_elements().len() != open_cap.get_elements().len() {
+                    return false;
+                }
+                return commitment
+                    .get_elements()
+                    .iter()
+                    .zip(open_cap.get_elements().iter())
+                    .all(|(commit_elem, open_elem)| {
+                        return commit_elem == open_elem.get_val();
+                    });
+            }
         }
-        return commitment
-            .get_content()
-            .iter()
-            .zip(response.iter())
-            .all(|(a, b)| a == b);
     }
 
-    /// Validate a closed capsule
-    pub fn validate_closed_capsule(
-        statement: &ClearResidue,
-        commitment: &Capsule,
-        response: &DynResidue<LIMBS>, // x^{-1}alpha
-    ) -> bool {
-        let reconstructed_commit = statement
-            .get_val()
-            .mul(&response.pow(statement.get_ambience().get_r().modulus()));
-        let reconstructed_commit = OpaqueResidue::new(reconstructed_commit);
-
-        return commitment.get_content().iter().any(|elem| {
-            return elem.get_val() == &reconstructed_commit;
-        });
-    }
-
-    pub fn verify(
-        statement: &ClearResidue,
-        commitment: &[Capsule],
-        responses: &[Response],
-    ) -> bool {
-        if commitment.len() != responses.len() {
+    /// Verify the proof
+    pub fn verify(&self) -> bool {
+        if self.commitment.len() != self.challenge.len() {
             return false;
         }
-        return commitment
+        if self.commitment.len() != self.response.len() {
+            return false;
+        }
+
+        return self
+            .commitment
             .iter()
-            .zip(responses.iter())
-            .all(|(capsule, response)| {
-                return match response {
-                    Response::OpenCapsule(opened_capsule) => {
-                        Self::validate_open_capsule(capsule, opened_capsule)
-                    }
-                    Response::DecompWitness(residue) => {
-                        Self::validate_closed_capsule(statement, capsule, residue)
-                    }
-                };
+            .zip(self.response.iter())
+            .all(|(commitment, response)| {
+                return Self::verify_response(&self.statement, commitment, response);
             });
     }
 }
 
-/// Each capsule contains a number of elements each from a distinct residue class
-pub struct Capsule {
-    content: Vec<ClearResidue>,
+/// Each closed capsule contains one random element from each of the specified residue
+/// classes, but we don't know which one is which
+pub struct OpaqueCapsule {
+    elements: Vec<OpaqueResidue>,
 }
 
-impl Capsule {
-    /// Start with an empty capsule
-    pub fn new() -> Self {
-        return Self { content: vec![] };
+impl OpaqueCapsule {
+    pub fn new(elements: Vec<OpaqueResidue>) -> Self {
+        return Self { elements };
     }
 
-    /// Reveal the content of the capsule
-    pub fn get_content(&self) -> &[ClearResidue] {
-        return &self.content;
+    pub fn get_elements(&self) -> &[OpaqueResidue] {
+        return &self.elements;
+    }
+}
+
+/// Each opened capsule reveals the residue class that each element belongs to
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct ClearCapsule {
+    elements: Vec<ClearResidue>,
+}
+
+impl ClearCapsule {
+    pub fn new(elements: Vec<ClearResidue>) -> Self {
+        return Self { elements };
     }
 
-    /// Append a new element
-    pub fn append(&mut self, elem: ClearResidue) {
-        self.content.push(elem);
+    pub fn get_elements(&self) -> &[ClearResidue] {
+        return &self.elements;
     }
 
-    /// Shuffle the order of the content
-    pub fn shuffle(&mut self) {
-        self.content.shuffle(&mut OsRng);
+    pub fn generate(classes: &[ResidueClass], pk: &PublicKey) -> Self {
+        let mut elements = classes
+            .iter()
+            .map(|rc| ClearResidue::random(Some(rc.clone_residue()), pk))
+            .collect::<Vec<ClearResidue>>();
+        elements.shuffle(&mut OsRng);
+        return Self::new(elements);
     }
 
-    pub fn open(&self) -> Response {
-        let mut residues = vec![];
-        residues.extend_from_slice(self.get_content());
-        return Response::OpenCapsule(residues);
+    pub fn obscure(&self) -> OpaqueCapsule {
+        let elements = self
+            .elements
+            .iter()
+            .map(|clear| clear.clone_val())
+            .collect::<Vec<OpaqueResidue>>();
+        return OpaqueCapsule::new(elements);
     }
 
-    /// Pick the element in the capsule with the same residue class as the statement, then return
-    /// x^{-1}x', where x is the witness of the statement, and x' is the witness of the matching
-    /// element in the capsule
-    pub fn decompose(&self, statement: &ClearResidue) -> Response {
-        let x_inv = statement.get_witness().invert();
-
-        for elem in self.get_content() {
-            if elem.get_rc().retrieve() == statement.get_rc().retrieve() {
-                let witness = elem.get_witness();
-                return Response::DecompWitness(x_inv.mul(&witness));
+    /// If the capsule is not selected to be opened, it will be consumed alongside the
+    /// statement to show that the statement has the same residue class as one of its
+    /// elements.
+    ///
+    /// If two elements w, w' have the same residue class, then w' * w^(-1) is an r-th
+    /// residue. So the returned value will be a decomposition of the value.
+    pub fn consume(&self, statement: &ClearResidue, pk: &PublicKey) -> ClearResidue {
+        for element in self.elements.iter() {
+            if element.get_rc() == statement.get_rc() {
+                // there is no straightforward way to invert a clear residue without
+                // the secret key, so we compute the response from the decomposition
+                let witness = element.clone_witness() * (statement.clone_witness().invert());
+                let zero = DynResidue::new(&BigInt::ZERO, pk.get_r().to_dyn_residue_params());
+                return ClearResidue::compose(zero, witness.get_residue().clone(), pk);
             }
         }
-
-        panic!("Capsule does not contain matching residue");
+        panic!("Capsule does not have matching element");
     }
 }
 
-/// If the challenge is 0, then the capsule opened. If the challenge is 1, then the element in the
-/// capsule with the same residue is combined with the statement, then decomposed, and the
-/// decomposition is the response
+/// Depending on whether the capsule is chosen, you either "open the capsule"
+/// and reveal which element belongs to which residue class, or "consume the capsule" and
+/// show the decomposition of (statement / capsule)
 pub enum Response {
-    OpenCapsule(Vec<ClearResidue>),
-    DecompWitness(DynResidue<LIMBS>),
+    OpenCapsule(ClearCapsule),
+    ConsumeCapsule(ClearResidue),
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{keys::KeyPair, BigInt};
+    use crypto_bigint::{rand_core::OsRng, Random};
 
+    use super::*;
+    use crate::keys::KeyPair;
+
+    #[test]
+    fn test_consume_capsule() {
+        let keypair = KeyPair::keygen(16, 64, false);
+        let residue_class = DynResidue::new(
+            &BigInt::random(&mut OsRng),
+            keypair.get_pk().get_r().to_dyn_residue_params(),
+        );
+        let statement = ClearResidue::random(Some(residue_class), keypair.get_pk());
+        let element = ClearResidue::random(Some(residue_class), keypair.get_pk());
+        let capsule = ClearCapsule::new(vec![element]);
+        let response = capsule.consume(&statement, keypair.get_pk());
+        assert!(response.is_exact_residue());
+    }
+
+    /// Test that honest prover can prove to an honest verifier
     #[test]
     fn test_correctness() {
         let keypair = KeyPair::keygen(16, 64, false);
-        let n = keypair.get_pk().get_n().to_dyn_residue_params();
-        let zero = DynResidue::new(&BigInt::ZERO, n);
-        let one = DynResidue::new(&BigInt::ONE, n);
+        let one = DynResidue::new(
+            &BigInt::ONE,
+            keypair.get_pk().get_r().to_dyn_residue_params(),
+        );
         let statement = ClearResidue::random(Some(one), keypair.get_pk());
-        let classes = vec![zero, one];
-        let confidence = 256usize;
-        let commitment = Proof::generate_commitment(&statement, &classes, confidence);
-        let challenge = Proof::generate_challenge(&commitment);
-        let response = Proof::respond(&statement, &commitment, &challenge);
-        let validated = Proof::verify(&statement, &commitment, &response);
-        assert!(validated);
+        let proof = BallotProof::from_statement(
+            &statement,
+            &zero_or_one(keypair.get_pk().get_r()),
+            keypair.get_pk(),
+        );
+        assert!(proof.verify());
     }
 }
