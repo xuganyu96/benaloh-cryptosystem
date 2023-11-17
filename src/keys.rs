@@ -193,11 +193,11 @@ impl KeyPair {
     /// than the ring size (duh).
     ///
     /// reference: 2 ** 33 ~= 8.58 billion, 2 ** 29 >= 300 million
-    pub fn keygen(ring_size: usize, modulus_size: usize, safe: bool) -> Self {
+    pub fn keygen(ring_size: usize, group_size: usize, safe: bool) -> Self {
         let r: BigInt = crypto_primes::generate_prime(Some(ring_size));
         let r = RingModulus::new(DynResidueParams::new(&r));
         let xbound = DynResidue::new(&BigInt::from_u8(2), DynResidueParams::new(&BigInt::MAX))
-            .pow(&BigInt::from_u64(modulus_size as u64))
+            .pow(&BigInt::from_u64(group_size as u64))
             .retrieve(); // x is the dominant term in the arithmetic sequence
                          // Generate the non-zero remainder in the arithmetic sequence
 
