@@ -15,7 +15,7 @@
 - [References](#references)
 
 
-# Verifiable secret-ballot election
+# A Rust implementation of "verifiable secret-ballot election"
 In his 1987 PhD thesis "[verifiable secret-ballot election](https://www.microsoft.com/en-us/research/wp-content/uploads/1987/01/thesis.pdf)", Josh Benaloh described a public-key cryptosystem whose homomorphic properties makes it suitable for being adapted into a secret-ballot election scheme. This project is an attempt at implementing the cryptosystem and the election scheme using the Rust programming language.
 
 In addition to the homomorphic encryption scheme, Benaloh also described a number of interactive proofs that can be used to ensure that the various parties (mostly the election authority and the voters) can prove to each other that they are behaving in accordance with the protocol. In this project, a few improvements are made to these interactive proofs, including applying Fiat-Shamir transformation and increasing the confidence of the proof.
@@ -29,22 +29,22 @@ The encryption scheme contains five main components: parameter generation, key g
     - $r$ is a prime number
     - $n = pq$ is the product of two prime numbers
     - $r \mid p-1$, $r \nmid \frac{p-1}{r}$, $r \nmid (q-1)$
-    - $y \in \mathbb{Z}_n^*$ and $y^\frac{\phi}{r} \not\equiv 1 \mod n$, where $\phi = \phi(n)$ is the Euler totient function.
+    - $y \in \mathbb{Z}_n^\ast$ and $y^\frac{\phi}{r} \not\equiv 1 \mod n$, where $\phi = \phi(n)$ is the Euler totient function.
 2. $\mathop{\text{KeyGen}}$ trivially uses the generated parameters: the public key is the triplet $(r, n, y)$. The secret key is the Euler's tuotient's $\phi(n)$
-3. To encrypt a message $m \in \mathbb{Z}_r$, sample a random element $x \leftarrow \mathbb{Z}_n^*$ and compute the quantity $c = y^mx^r \mod n$. $c \in \mathbb{Z}_n$ is the ciphertext.
+3. To encrypt a message $m \in \mathbb{Z}_r$, sample a random element $x \leftarrow \mathbb{Z}_n^\ast$ and compute the quantity $c = y^mx^r \mod n$. $c \in \mathbb{Z}_n$ is the ciphertext.
 4. To decrypt the ciphertext, first raise it to the power of $\frac{\phi}{r}$, then solve the discrete log problem $c^\frac{\phi}{r} \equiv (y^\frac{\phi}{r})^m \mod n$ with respect to $m$
 
-In Benaloh's thesis, the triplet $(r, n, y)$ that satisfies the conditions in the parameter generation is called the "perfect (prime) consonance". With a perfect prime consonance prime, every element $z \in \mathbb{Z}_n^*$ has a unique decomposition
+In Benaloh's thesis, the triplet $(r, n, y)$ that satisfies the conditions in the parameter generation is called the "perfect (prime) consonance". With a perfect prime consonance prime, every element $z \in \mathbb{Z}_n^\ast$ has a unique decomposition
 
 $$
 z = y^cx^r
 $$
 
-For some $c \in \mathbb{Z}_r$ in the integer ring $\mod r$ and some $x \in \mathbb{Z}_n^*$. The number $c \in \mathbb{Z}_r$ is called the residue class of the element $z$, and the number $x$ is called the witness.
+For some $c \in \mathbb{Z}_r$ in the integer ring $\mathbb{Z}_r$ and some $x \in \mathbb{Z}_n^\ast$. The number $c \in \mathbb{Z}_r$ is called the residue class of the element $z$, and the number $x$ is called the witness.
 
 From a high level, the IND-CPA security of this scheme is conditioned on the conjectured hardness of distinguishing higher residuosity, which itself is a generalization of the conjectured hardness of distinguishing quadratic residue from quadratic non-residue.
 
-This cryptosystem exhibits homomorphic properties, where the residue class of the product of two ciphertexts is exactly the sum of the residue classes of the individual ciphertexts. This property allows this cryptosystem to be adapted into a secret-ballot election scheme: each voter encrypts the vote ("no" or "yes", encoded as 0 and 1 respectively) and publishes teh ciphertext, then the election authority collects all ciphertexts, compute their product, and decrypt the product to reveal the final tally.
+This cryptosystem exhibits homomorphic properties, where the residue class of the product of two ciphertexts is exactly the sum of the residue classes of the individual ciphertexts. This property allows this cryptosystem to be adapted into a secret-ballot election scheme: each voter encrypts the vote ("no" or "yes", encoded as 0 and 1 respectively) and publishes the ciphertext, then the election authority collects all ciphertexts, compute their product, and decrypt the product to reveal the final tally.
 
 # A naive election scheme
 Here we describe a naive election scheme based on the cryptosystem described above and its homomorphic properties.
@@ -59,9 +59,9 @@ Already, this election has the very desirable combination of confidentiality and
 Unfortunately, this naive scheme also suffers from many problems that can happen when one or the other parties acts dishonestly. Here are three of them and how they are addressed using zero-knowledge proof.
 
 ## The last voter's attack
-Recall from basic number theory that, given a pair of non-trivial square root of some element $x \in \mathbb{Z}_n^*$, there is a non-negligible chance that $n$ can be factored. Similarly, given two distinct r-th root of some element $x \in \mathbb{Z}_n^*$, there is also a non-negligible chance of factoring $n$. This means that if someone other than the election official can obtain such distinct root, he/she can compute the secret key $\phi$ and thus be able to see the vote of other voters, thus breaching the confidentiality.
+Recall from basic number theory that, given a pair of non-trivial square root of some element $x \in \mathbb{Z}_n^\ast$, there is a non-negligible chance that $n$ can be factored. Similarly, given two distinct r-th root of some element $x \in \mathbb{Z}_n^\ast$, there is also a non-negligible chance of factoring $n$. This means that if someone other than the election official can obtain such distinct root, he/she can compute the secret key $\phi$ and thus be able to see the vote of other voters, thus breaching the confidentiality.
 
-Unfortunately, with the naive election scheme, the last voter can manipulate his vote in such a way that he/she can obtain two distinct r-th root. One of the r-th root is randomly generated $x^\prime \leftarrow \mathbb{Z}_n^*$, and the last voter can compute the multiplicative inverse of the product of all other ciphertexts, then generate the following ciphertext:
+Unfortunately, with the naive election scheme, the last voter can manipulate his vote in such a way that he/she can obtain two distinct r-th root. One of the r-th root is randomly generated $x^\prime \leftarrow \mathbb{Z}_n^\ast$, and the last voter can compute the multiplicative inverse of the product of all other ciphertexts, then generate the following ciphertext:
 
 $$
 w_\text{last} = (\prod_\text{all other voters}w_i)^{-1}(x_\text{last})^r
@@ -78,9 +78,9 @@ $$
 
 From here, when the election officials release the decomposition, they will end up releasing a second r-th root of $(x_\text{last})^r$. Since $x_\text{last}$ is randomly sampled and each r-th residue has exactly $r$ distinct roots under the perfect consonance, the chance that the two roots are distinct is $\frac{r-1}{r}$, which is non-negligible. The honesty of the election officials here is important because dishonest officials can simply decrypt the individual votes and will be able to find out that the last vote is invalid.
 
-One way to mitigate the last voter's attack is to simply not release the decomposition of the final product. However, without release the decomposition, the election officials need to find another way to convince the public that the announced tally is correct. This can be done because under perfect consonance, two elements $w_1, w_2 \in \mathbb{Z}_n^*$ belong to the same residue class if and only if $w_1w_2^{-1}$ is an r-th residue, which means that the government can prove that the final product belongs to residue class $c$ by proving that $wy^{-c}$ is an r-th residue.
+One way to mitigate the last voter's attack is to simply not release the decomposition of the final product. However, without releasing the decomposition, the election officials need to find another way to convince the public that the announced tally is correct. This can be done because under perfect consonance, two elements $w_1, w_2 \in \mathbb{Z}_n^\ast$ belong to the same residue class if and only if $w_1w_2^{-1}$ is an r-th residue, which means that the government can prove that the final product belongs to residue class $c$ by proving that $wy^{-c}$ is an r-th residue.
 
-Here a zero-knowledge proof can be used to prove that $wy^{-c}$ is r-th residue without revealing additional information. The core idea of the proof is that the election officials first produce a second r-th residue $z^\prime = {x^\prime}^r$, which we will call the "commitment". The voter then challenges the election officials with a random coin flip: if tail comes up, the election officials release the decomposition of the commitment; if head comes up, the election officials release the decomposition of the product $zz^\prime$. Once the decomposition is released, it is easy to verify that the decomposition is legitimate: the voter raises the decomposition to the r-th power and check equality with the corresponding quantity. It should be easy to see that an honest election official can prove to an honest voter.
+Here a zero-knowledge proof can be used to prove that $wy^{-c}$ is r-th residue without revealing additional information. The core idea of the proof is that the election officials first produce a second r-th residue $z^\prime = ({x^\prime})^r$, which we will call the "commitment". The voter then challenges the election officials with a random coin flip: if tail comes up, the election officials release the decomposition of the commitment; if head comes up, the election officials release the decomposition of the product $zz^\prime$. Once the decomposition is released, it is easy to verify that the decomposition is legitimate: the voter raises the decomposition to the r-th power and check equality with the corresponding quantity. It should be easy to see that an honest election official can prove to an honest voter.
 
 If the election officials are dishonest (say they want to claim a bogus tally $c^\prime$ and try to convince the voter that $wy^{-c^\prime}$ is an r-th residue even though it is not), they can only cheat the proof by guessing the challenge ahead of time: if they know the challenge to ask for the decomposition fo the commitment, then they produce a legitimate r-th residue for the commitment; if they know the challenge to ask for the decomposition of the product, then they produce an equally bogus commitment such that the product $wy^{c^\prime} \cdot z'$ is an r-th residue. This means that dishonest election officials have a 50% chance of cheating the proof in a single run, and honest voters can increase their confidence in the proof by repeatedly running it. We will also present an improvement at the end of this section that reduces of chance of cheating from 50% to $\frac{1}{r}$. On the other hand, this proof can be proved to leak no other information. This is true because $z'$ and $zz'$ are a statistically random elements that the voters themselves could have generated anyways.
 
@@ -90,7 +90,7 @@ Here is the sigma-protocol for the proof of r-th residue:
 
 - **statement**: $z$, where $z = x^r$ is an r-th residue
 - **commitment**: $z'$, where $z' = {x'}^r$ is a randomly sampled r-th residue
-- **challenge**: $b = H(z')$, where $H: \mathbb{Z}_n^* \rightarrow \mathbb{Z}_r$ is a hash function
+- **challenge**: $b = H(z')$, where $H: \mathbb{Z}_n^\ast \rightarrow \mathbb{Z}_r$ is a hash function
 - **response**: $x'x^b$
 - **verification**: Check equality $(x'x^b)^r \equiv z'z^b$
 
@@ -103,20 +103,20 @@ Similar to the r-th residue proof, the voter can only cheat the proof by guessin
 
 - **statement**: $w$, where $w = y^cx^r$ and $c \in \{0, 1\}$
 - **commitment**: $\{(u, v)\}_{i=1}^N$, where within each pair one of them is $a_i^r$ and the other is $yb_i^r$, but we don't know which is which
-- **challenge**: $H: Z_n^* \times Z_n^* \rightarrow \{0, 1\}$, which takes a commitment and returns a coin toss
+- **challenge**: $H: Z_n^\ast \times Z_n^\ast \rightarrow \{0, 1\}$, which takes a commitment and returns a coin toss
 - **response**: if $H(\text{commitment}_i) = 0$, return $(a_i, b_i)$ in the order of the individual element in order. If $H(\text{commitment}_i) = 1$, return $x^{-1}z$, where $z = a$ if $c = 0$ and $z = b$ if $c = 1$.
 - **verify**: if $H(\text{commitment}_i) = 0$, check that each decomposition is correct. if $H(\text{commitment}_i) = 1$, check that $w \cdot \text{response}^r$ is equal to one of the capsule element
 
 ## Invalid parameters
-Dishonest election officials can generate incorrect parameters that allow the election officials to claim incorrect tally and still produce valid proof. For example, if $r, \phi$ are relatively prime instead of $\gcd(r, \phi) = r$, then all elements of $Z_n^*$ are r-th residue, and the election officials can demonstrate $wy^{-c}$ to be an r-th residue for arbitrary $c$.
+Dishonest election officials can generate incorrect parameters that allow the election officials to claim incorrect tally and still produce valid proof. For example, if $r, \phi$ are relatively prime instead of $\gcd(r, \phi) = r$, then all elements of $Z_n^\ast$ are r-th residue, and the election officials can demonstrate $wy^{-c}$ to be an r-th residue for arbitrary $c$.
 
 A solution to this is an interactive proof in which the election officials demonstrate that they can correctly identify the residue class of randomly generated ciphertexts. In other words, voters first generate random elements from random residue class, then ask the election officials to identify the residue class. If the parameters are generated incorrectly, then there are fewer residue classes than $r$; in fact, it can be shown that the number of distinct residue classes must divide $r$, so if we set $r$ to be prime, then dishonest parameters correspond to only one residue class, and the election officials will only have $\frac{1}{r}$ probability of correctly guessing the residue class.
 
 The problem with the solution above is that dishonest voter can take advantage of an honest election authority and challenge the authority to decrypt ciphertexts that the voter did not generate himself. To mitigate the possibility of the election authority unwillingly becoming a decryption oracle, the challenge ciphertext must also be accompanied by a proof that the voter already knows the residue class of the challenge ciphertext. Such proof follows the classic Fiat-Shamir transformation:
 
-- **statement**: $w \in \mathbb{Z}_n^*$ where $w = y^cx^r$
-- **commitment**: $w' \in \mathbb{Z}_n^*$ where $w' = y^{c'}{x'}^r$
-- **challenge**: $b \leftarrow H(w')$, where $H: \mathbb{Z}_n^* \rightarrow \mathbb{Z}_r$ is a hash function
+- **statement**: $w \in \mathbb{Z}_n^\ast$ where $w = y^cx^r$
+- **commitment**: $w' \in \mathbb{Z}_n^\ast$ where $w' = y^{c'}{x'}^r$
+- **challenge**: $b \leftarrow H(w')$, where $H: \mathbb{Z}_n^\ast \rightarrow \mathbb{Z}_r$ is a hash function
 - **response**: $c' + bc$
 - **verification**: $ww'y^{-(c' + bc)}$ is an r-th residue, which can be done because the verifier is the election authority, who has the secret key $\phi$
 
